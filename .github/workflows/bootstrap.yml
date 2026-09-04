@@ -28,6 +28,7 @@ jobs:
           cp -a /tmp/itct-crm/. ./
           rm -rf .bootstrap
           rm -f .github/workflows/bootstrap.yml
+          rm -f .github/workflows/ci.yml
 
       - name: Commit complete source
         shell: bash
@@ -41,8 +42,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-
+        
       - name: Verify frontend
         shell: bash
         run: |
