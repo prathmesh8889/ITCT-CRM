@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# env & secrets — never commit
+.env
+backend/.env
+frontend/.env
+
+# build output
+dist/
+build/
+
+# local databases & uploads
+*.db
+test_itct.db
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# editors
+.vscode/
+.idea/
+.DS_Store
+.next/
+*.log
