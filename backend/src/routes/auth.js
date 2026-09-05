@@ -6,6 +6,7 @@ const jwt = require("jsonwebtoken");
 const { db } = require("../db");
 const { config, HttpError, sha256 } = require("../core");
 const { hashPassword, verifyPassword, signAccess, signRefresh, newRefreshHash, requireAuth } = require("../security");
+const { ensureAuthSchema } = require("../auth-schema");
 
 const router = express.Router();
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
@@ -29,6 +30,7 @@ const audit = (userId, userName, action, target, detail = "") =>
 
 router.post("/login", async (req, res, next) => {
   try {
+    await ensureAuthSchema();
     const email = normalizeEmail(req.body?.email);
     const password = String(req.body?.password || "");
     if (!email || !password) throw new HttpError(422, "Email and password are required");
@@ -38,8 +40,6 @@ router.post("/login", async (req, res, next) => {
     if (attempts.length >= MAX_ATTEMPTS)
       throw new HttpError(429, "Too many failed attempts. Try again in 5 minutes.");
 
-    // BTRIM + LOWER also lets legacy employee rows created with accidental
-    // leading/trailing spaces in the email continue to sign in correctly.
     const user = await db.one(
       "SELECT * FROM users WHERE LOWER(BTRIM(email)) = $1 AND deleted_at IS NULL ORDER BY id LIMIT 1",
       [email],
@@ -60,13 +60,14 @@ router.post("/login", async (req, res, next) => {
       [user.id, sha256(refresh), new Date(Date.now() + config.refreshDays * 86400_000)]);
     await db.query("UPDATE users SET last_login_at = now() WHERE id = $1", [user.id]);
     failed.delete(key);
-    await audit(user.id, user.name, "Login", "auth", "Successful login");
+    await audit(user.id, user.name, "Login", "auth", user.must_change_password ? "Successful login; password change required" : "Successful login");
     res.json({ access_token: signAccess(user, role?.name || ""), refresh_token: refresh, token_type: "bearer" });
   } catch (e) { next(e); }
 });
 
 router.post("/refresh", async (req, res, next) => {
   try {
+    await ensureAuthSchema();
     const token = String(req.body?.refresh_token || "");
     let payload;
     try { payload = jwt.verify(token, config.jwtSecret); } catch { throw new HttpError(401, "Invalid refresh token"); }
@@ -74,13 +75,12 @@ router.post("/refresh", async (req, res, next) => {
     const row = await db.one("SELECT * FROM refresh_tokens WHERE token_hash = $1", [sha256(token)]);
     if (!row || row.expires_at < new Date()) throw new HttpError(401, "Refresh token expired");
     if (row.revoked) {
-      // Reuse of a revoked token ⇒ treat as theft: kill the whole session family.
       await db.query("UPDATE refresh_tokens SET revoked = TRUE WHERE user_id = $1", [row.user_id]);
       throw new HttpError(401, "Refresh token reuse detected — session revoked");
     }
     const user = await db.one("SELECT * FROM users WHERE id = $1 AND deleted_at IS NULL", [row.user_id]);
     if (!user || !user.active) throw new HttpError(401, "Account is disabled");
-    await db.query("UPDATE refresh_tokens SET revoked = TRUE WHERE id = $1", [row.id]); // rotation
+    await db.query("UPDATE refresh_tokens SET revoked = TRUE WHERE id = $1", [row.id]);
     const refresh = signRefresh(user);
     await db.query("INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1,$2,$3)",
       [user.id, sha256(refresh), new Date(Date.now() + config.refreshDays * 86400_000)]);
@@ -107,15 +107,18 @@ router.get("/me", requireAuth, async (req, res, next) => {
 
 router.post("/change-password", requireAuth, async (req, res, next) => {
   try {
+    await ensureAuthSchema();
     const { old_password, new_password } = req.body || {};
     if (!verifyPassword(String(old_password || ""), req.user.password_hash))
       throw new HttpError(400, "Current password is incorrect");
     if (!new_password || String(new_password).length < 8)
       throw new HttpError(422, "New password must be at least 8 characters");
-    await db.query("UPDATE users SET password_hash = $1 WHERE id = $2", [hashPassword(new_password), req.user.id]);
+    if (String(old_password || "") === String(new_password))
+      throw new HttpError(422, "New password must be different from the temporary/current password");
+    await db.query("UPDATE users SET password_hash = $1, must_change_password = FALSE WHERE id = $2", [hashPassword(new_password), req.user.id]);
     await db.query("UPDATE refresh_tokens SET revoked = TRUE WHERE user_id = $1", [req.user.id]);
-    await audit(req.user.id, req.user.name, "Password Changed", `user:${req.user.email}`);
-    res.json({ ok: true });
+    await audit(req.user.id, req.user.name, "Password Changed", `user:${req.user.email}`, "Password change requirement cleared");
+    res.json({ ok: true, must_change_password: false });
   } catch (e) { next(e); }
 });
 
