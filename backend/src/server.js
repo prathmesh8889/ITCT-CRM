@@ -8,6 +8,7 @@ const { db, initSchema } = require("./db");
 const { config, HttpError } = require("./core");
 const { sweepOverdueInvoices } = require("./engines");
 const { cleanupDemoData } = require("./cleanup-demo");
+const { ensureAuthSchema } = require("./auth-schema");
 const { router: crmRoutes, startDiscoveryWorker } = require("./routes/crm");
 
 const app = express();
@@ -44,12 +45,11 @@ app.get("/api/health", async (_req, res) => {
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api", crmRoutes);
 app.use("/api", require("./routes/billing"));
-// Mounted before the legacy analytics router so employee dashboard requests are
-// always ownership- and permission-scoped server-side.
 app.use("/api", require("./routes/dashboard"));
 // Employee creation needs special handling for a previously soft-deleted email.
-// Mount this before the broader admin router so POST /users is handled here.
 app.use("/api", require("./routes/user-create"));
+// Employee profile + admin password reset routes.
+app.use("/api", require("./routes/user-security"));
 app.use("/api", require("./routes/admin"));
 
 app.use("/api", (_req, res) => res.status(404).json({ detail: "Not Found" }));
@@ -67,11 +67,14 @@ async function main() {
   if (config.autoMigrate) {
     try {
       await initSchema();
-      console.log("[boot] schema ready (CREATE TABLE IF NOT EXISTS)");
+      await ensureAuthSchema();
+      console.log("[boot] schema ready (CREATE/ALTER IF NOT EXISTS)");
     } catch (e) {
       console.error(`[boot] FATAL — cannot reach PostgreSQL at ${config.databaseUrl}\n       ${e.message}`);
       process.exit(1);
     }
+  } else {
+    await ensureAuthSchema();
   }
   try {
     const result = await cleanupDemoData();
