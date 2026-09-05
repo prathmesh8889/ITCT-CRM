@@ -92,7 +92,6 @@ async function cleanupDemoData() {
       await c.query("UPDATE leads SET assigned_team_id = NULL WHERE assigned_team_id = ANY($1::int[]) AND NOT (id = ANY($2::int[]))", [demoTeams, demoLeads]);
     }
 
-    // Assignment history can reference seeded users/teams even when the lead itself is real.
     if (any(demoUsers) || any(demoTeams)) {
       await del("lead_assignments_demo_refs",
         "DELETE FROM lead_assignments WHERE user_id = ANY($1::int[]) OR team_id = ANY($2::int[])",
@@ -136,6 +135,14 @@ async function cleanupDemoData() {
       ('email','Introduction'),('email','Invoice'))`);
     await del("welcome_notification", "DELETE FROM notifications WHERE title = 'Welcome to ITCT CRM' AND body LIKE 'Seed data loaded%'");
 
+    // Final FK sweep for any real records that were still assigned to a demo employee.
+    if (any(demoUsers)) {
+      await c.query("UPDATE followups SET employee_id = NULL WHERE employee_id = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE calls SET employee_id = NULL WHERE employee_id = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE tasks SET assigned_to_id = NULL WHERE assigned_to_id = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE tasks SET created_by_id = $1 WHERE created_by_id = ANY($2::int[])", [ownerId, demoUsers]);
+    }
+
     // Remove the seeded employee identities, but keep a working owner login and
     // strip the fake personal profile from that owner account.
     if (any(demoUsers)) {
@@ -147,8 +154,6 @@ async function cleanupDemoData() {
       designation = 'Super Admin', team_id = NULL, reporting_manager_id = NULL, joining_date = NULL,
       is_sales = FALSE WHERE id = $1`, [ownerId]);
 
-    // Remove stale demo-user references from assignment settings without touching
-    // the user's chosen strategy or thresholds.
     const a = (await c.query("SELECT value FROM crm_settings WHERE key = 'assignment'")).rows[0]?.value;
     if (a && typeof a === "object") {
       const bad = new Set(demoUsers.map(String));
