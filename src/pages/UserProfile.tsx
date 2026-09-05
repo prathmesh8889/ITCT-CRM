@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, BriefcaseBusiness, CalendarDays, KeyRound, ListChecks, Mail, Phone, Target, UserRound, Users } from "lucide-react";
+import { ArrowLeft, Briefcase, CalendarDays, KeyRound, ListChecks, Mail, Phone, Target, UserRound, Users } from "lucide-react";
 import { api } from "../lib/api";
 import { useStore } from "../store";
 import { Avatar, Badge, Btn } from "../components/ui";
@@ -70,7 +71,7 @@ export default function UserProfile() {
             <div className="grid gap-3 sm:grid-cols-2">
               <Info icon={<Mail size={15} />} label="Email" value={p.email} />
               <Info icon={<Phone size={15} />} label="Phone" value={p.phone || "—"} />
-              <Info icon={<BriefcaseBusiness size={15} />} label="Role" value={data.role?.name || "—"} />
+              <Info icon={<Briefcase size={15} />} label="Role" value={data.role?.name || "—"} />
               <Info icon={<Users size={15} />} label="Team" value={data.team?.name || "No team"} />
               <Info icon={<CalendarDays size={15} />} label="Joining date" value={p.joining_date ? String(p.joining_date).slice(0, 10) : "—"} />
               <Info icon={<CalendarDays size={15} />} label="Last login" value={p.last_login_at ? fmtDT(p.last_login_at) : "Never"} />
@@ -82,7 +83,7 @@ export default function UserProfile() {
             <div className="grid grid-cols-2 gap-3">
               <Metric icon={<Target size={16} />} label="Assigned leads" value={data.summary.leads} />
               <Metric icon={<ListChecks size={16} />} label="Tasks" value={data.summary.tasks} />
-              <Metric icon={<BriefcaseBusiness size={16} />} label="Deals" value={data.summary.deals} />
+              <Metric icon={<Briefcase size={16} />} label="Deals" value={data.summary.deals} />
               <Metric icon={<Phone size={16} />} label="Follow-ups" value={data.summary.followups} />
             </div>
             <div className="mt-3 rounded-lg border border-ink-200/70 bg-ink-50 p-3 text-[11.5px] text-ink-500 dark:border-ink-700 dark:bg-ink-800/50">
@@ -95,10 +96,10 @@ export default function UserProfile() {
   );
 }
 
-function Info({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function Info({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return <div className="rounded-lg border border-ink-200/70 p-3 dark:border-ink-700"><div className="flex items-center gap-2 text-[11px] text-ink-400">{icon}{label}</div><div className="mt-1 break-words text-[13px] font-semibold text-ink-800 dark:text-ink-100">{value}</div></div>;
 }
 
-function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
+function Metric({ icon, label, value }: { icon: ReactNode; label: string; value: number }) {
   return <div className="rounded-lg border border-ink-200/70 bg-surface p-3 dark:border-ink-700 dark:bg-ink-900"><div className="flex items-center gap-2 text-brand-600">{icon}<span className="num text-[18px] font-bold">{value}</span></div><div className="mt-1 text-[11px] text-ink-400">{label}</div></div>;
 }
