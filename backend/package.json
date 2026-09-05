@@ -10,7 +10,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "seed": "node src/seed.js",
-    "test": "node --test tests/api.test.js"
+    "test": "node --test tests/api.test.js tests/employee-security.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
