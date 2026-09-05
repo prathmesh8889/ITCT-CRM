@@ -110,7 +110,7 @@ router.post("/change-password", requireAuth, async (req, res, next) => {
     await ensureAuthSchema();
     const { old_password, new_password } = req.body || {};
     if (!verifyPassword(String(old_password || ""), req.user.password_hash))
-      throw new HttpError(400, "Current password is incorrect");
+      throw new HttpError(422, "Current password is incorrect");
     if (!new_password || String(new_password).length < 8)
       throw new HttpError(422, "New password must be at least 8 characters");
     if (String(old_password || "") === String(new_password))
