@@ -47,6 +47,9 @@ app.use("/api", require("./routes/billing"));
 // Mounted before the legacy analytics router so employee dashboard requests are
 // always ownership- and permission-scoped server-side.
 app.use("/api", require("./routes/dashboard"));
+// Employee creation needs special handling for a previously soft-deleted email.
+// Mount this before the broader admin router so POST /users is handled here.
+app.use("/api", require("./routes/user-create"));
 app.use("/api", require("./routes/admin"));
 
 app.use("/api", (_req, res) => res.status(404).json({ detail: "Not Found" }));
