@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Pencil, Plus, Search, Settings2, Trash2, UserCheck, UserX, Users } from "lucide-react";
+import { Copy, Eye, KeyRound, Pencil, Plus, Search, Settings2, Trash2, UserCheck, UserX, Users } from "lucide-react";
 import { useStore } from "../store";
 import { mutate, uid, useDB, hashPass } from "../lib/db";
 import { api, DEMO_MODE } from "../lib/api";
@@ -8,6 +8,7 @@ import type { User } from "../lib/types";
 import { Avatar, Badge, Btn, Field, Input, Modal, Select, Toggle } from "../components/ui";
 import { fmtDT } from "../lib/services";
 
+type SecureUser = User & { mustChangePassword?: boolean };
 type EmployeeForm = {
   name: string;
   email: string;
@@ -30,12 +31,14 @@ type BackendUser = {
   is_sales?: boolean;
   created_at?: string;
   last_login_at?: string | null;
+  must_change_password?: boolean;
 };
 
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
+const tempPassword = () => `ITCT@${Math.random().toString(36).slice(2, 8)}${Math.floor(10 + Math.random() * 89)}`;
 
 function toLocalUser(row: BackendUser, password = ""): User {
-  return {
+  const out: SecureUser = {
     id: String(row.id),
     name: row.name,
     email: row.email,
@@ -48,18 +51,12 @@ function toLocalUser(row: BackendUser, password = ""): User {
     isSales: !!row.is_sales,
     createdAt: row.created_at || new Date().toISOString(),
     lastLogin: row.last_login_at || undefined,
+    mustChangePassword: !!row.must_change_password,
   };
+  return out;
 }
 
-function EmployeeEditor({
-  open,
-  employee,
-  onClose,
-}: {
-  open: boolean;
-  employee: User | null;
-  onClose: () => void;
-}) {
+function EmployeeEditor({ open, employee, onClose }: { open: boolean; employee: User | null; onClose: () => void }) {
   const { toast } = useStore();
   const d = useDB();
   const defaultRole = (d.roles.find((r) => r.name === "Sales Executive") || d.roles[0])?.id || "";
@@ -70,7 +67,7 @@ function EmployeeEditor({
     phone: employee?.phone || "",
     roleId: employee?.roleId || defaultRole,
     teamId: employee?.teamId || "",
-    password: employee ? "" : "Sales@123",
+    password: employee ? "" : tempPassword(),
     active: employee?.active ?? true,
   }));
 
@@ -141,7 +138,7 @@ function EmployeeEditor({
             color: "#0F766E", isSales, createdAt: new Date().toISOString(),
           }));
         }
-        toast("Employee created", "ok", `${email} · temporary password: ${form.password}`);
+        toast("Employee created", "ok", `${email} · temporary password: ${form.password} · change required at first login`);
       }
       onClose();
     } catch (e) {
@@ -159,11 +156,54 @@ function EmployeeEditor({
         <Field label="Full name" req><Input value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} /></Field>
         <Field label="Email" req><Input type="email" value={form.email} onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))} /></Field>
         <Field label="Phone"><Input value={form.phone} onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))} /></Field>
-        {!employee && <Field label="Temporary password" req><Input value={form.password} onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))} /></Field>}
+        {!employee && <Field label="Temporary password" req><div className="flex gap-2"><Input value={form.password} onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))} /><Btn type="button" size="xs" variant="outline" onClick={() => setForm((p) => ({ ...p, password: tempPassword() }))}>Generate</Btn></div></Field>}
         <Field label="Role"><Select value={form.roleId} onChange={(e) => setForm((p) => ({ ...p, roleId: e.target.value }))}>{d.roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</Select></Field>
         <Field label="Team"><Select value={form.teamId} onChange={(e) => setForm((p) => ({ ...p, teamId: e.target.value }))}><option value="">No team</option>{d.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select></Field>
+        {!employee && <div className="sm:col-span-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-[11.5px] text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">Share the temporary password securely. The employee will be forced to create a new password at first login.</div>}
         {employee && <div className="sm:col-span-2"><Toggle on={form.active} onChange={(active) => setForm((p) => ({ ...p, active }))} label={form.active ? "Employee active" : "Employee disabled"} /></div>}
       </div>
+    </Modal>
+  );
+}
+
+function ResetPasswordModal({ employee, onClose }: { employee: User | null; onClose: () => void }) {
+  const { toast } = useStore();
+  const [password, setPassword] = useState(() => tempPassword());
+  const [busy, setBusy] = useState(false);
+  if (!employee) return null;
+
+  const reset = async () => {
+    if (password.length < 8) { toast("Temporary password must be at least 8 characters", "err"); return; }
+    setBusy(true);
+    try {
+      await api.post(`/users/${employee.id}/reset-password`, { password });
+      mutate((db) => {
+        const u = db.users.find((x) => x.id === employee.id) as SecureUser | undefined;
+        if (u) u.mustChangePassword = true;
+      });
+      toast("Employee password reset", "ok", `${employee.email} · temporary password: ${password}`);
+      onClose();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not reset password", "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(password); toast("Temporary password copied", "ok"); }
+    catch { toast("Copy failed — select and copy the password manually", "warn"); }
+  };
+
+  return (
+    <Modal open={!!employee} onClose={onClose} title="Reset employee password" footer={
+      <><Btn variant="ghost" onClick={onClose}>Cancel</Btn><Btn loading={busy} onClick={() => void reset()}><KeyRound size={14} /> Reset password</Btn></>
+    }>
+      <p className="mb-4 text-[13px] leading-relaxed text-ink-600 dark:text-ink-300">Set a temporary password for <strong>{employee.name}</strong>. All existing refresh sessions will be revoked and the employee must change this password at the next login.</p>
+      <Field label="Temporary password" req>
+        <div className="flex gap-2"><Input value={password} onChange={(e) => setPassword(e.target.value)} /><Btn type="button" variant="outline" onClick={() => void copy()}><Copy size={14} /> Copy</Btn></div>
+      </Field>
+      <div className="mt-3 flex flex-wrap gap-2"><Btn size="xs" variant="soft" onClick={() => setPassword(tempPassword())}>Generate another</Btn><span className="self-center text-[11px] text-ink-400">Minimum 8 characters.</span></div>
     </Modal>
   );
 }
@@ -176,6 +216,7 @@ export default function EmployeeManagement() {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
   const [deleting, setDeleting] = useState<User | null>(null);
+  const [resetting, setResetting] = useState<User | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const employees = useMemo(() => {
@@ -215,15 +256,17 @@ export default function EmployeeManagement() {
 
   const roleName = (u: User) => d.roles.find((r) => r.id === u.roleId)?.name || "No role";
   const teamName = (u: User) => d.teams.find((t) => t.id === u.teamId)?.name || "—";
+  const needsPassword = (u: User) => !!(u as SecureUser).mustChangePassword;
 
   return (
     <div className="mx-auto max-w-[1250px] p-4 md:p-6">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="hd flex items-center gap-2 text-[22px]"><Users size={20} /> Employee Management</h1>
-          <p className="mt-0.5 text-[12.5px] text-ink-500">Add, edit, enable/disable and remove employees. Role permissions remain server-enforced.</p>
+          <p className="mt-0.5 text-[12.5px] text-ink-500">Add, edit, open profiles, reset passwords, enable/disable and remove employees.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Btn variant="outline" size="sm" onClick={() => nav(`/profile/${user!.id}`)}><Eye size={14} /> My profile</Btn>
           <Btn variant="outline" size="sm" onClick={() => nav("/access-settings")}><Settings2 size={14} /> Roles & Teams</Btn>
           {can("employees", "create") && <Btn size="sm" onClick={() => setAdding(true)}><Plus size={14} /> Add employee</Btn>}
         </div>
@@ -243,40 +286,46 @@ export default function EmployeeManagement() {
       <div className="space-y-3 md:hidden">
         {employees.map((u) => (
           <div key={u.id} className="card p-4">
-            <div className="flex items-start justify-between gap-3">
+            <button onClick={() => nav(`/profile/${u.id}`)} className="flex w-full items-start justify-between gap-3 text-left">
               <div className="flex min-w-0 items-center gap-3"><Avatar name={u.name} color={u.color} size={36} /><div className="min-w-0"><div className="truncate font-semibold text-ink-900 dark:text-ink-50">{u.name}</div><div className="truncate text-[11px] text-ink-400">{u.email}</div></div></div>
-              <Badge tone={u.active ? "green" : "red"}>{u.active ? "Active" : "Disabled"}</Badge>
-            </div>
+              <div className="flex flex-col items-end gap-1"><Badge tone={u.active ? "green" : "red"}>{u.active ? "Active" : "Disabled"}</Badge>{needsPassword(u) && <Badge tone="amber">Password change</Badge>}</div>
+            </button>
             <div className="mt-3 grid grid-cols-2 gap-2 text-[12px]">
               <div><span className="text-ink-400">Role</span><div className="font-medium">{roleName(u)}</div></div>
               <div><span className="text-ink-400">Team</span><div className="font-medium">{teamName(u)}</div></div>
               <div><span className="text-ink-400">Phone</span><div className="font-medium">{u.phone || "—"}</div></div>
               <div><span className="text-ink-400">Last login</span><div className="font-medium">{u.lastLogin ? fmtDT(u.lastLogin) : "Never"}</div></div>
             </div>
-            {u.id !== user!.id && <div className="mt-4 flex flex-wrap gap-2">
-              {can("employees", "edit") && <Btn size="xs" variant="outline" onClick={() => setEditing(u)}><Pencil size={12} /> Edit</Btn>}
-              {can("employees", "edit") && <Btn size="xs" variant={u.active ? "ghost" : "soft"} disabled={busyId === u.id} onClick={() => void setActive(u, !u.active)}>{u.active ? <UserX size={12} /> : <UserCheck size={12} />}{u.active ? "Disable" : "Enable"}</Btn>}
-              {can("employees", "delete") && <Btn size="xs" variant="danger" onClick={() => setDeleting(u)}><Trash2 size={12} /> Remove</Btn>}
-            </div>}
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Btn size="xs" variant="soft" onClick={() => nav(`/profile/${u.id}`)}><Eye size={12} /> Profile</Btn>
+              {u.id !== user!.id && <>
+                {can("employees", "edit") && <Btn size="xs" variant="outline" onClick={() => setEditing(u)}><Pencil size={12} /> Edit</Btn>}
+                {can("employees", "edit") && <Btn size="xs" variant="outline" onClick={() => setResetting(u)}><KeyRound size={12} /> Reset password</Btn>}
+                {can("employees", "edit") && <Btn size="xs" variant={u.active ? "ghost" : "soft"} disabled={busyId === u.id} onClick={() => void setActive(u, !u.active)}>{u.active ? <UserX size={12} /> : <UserCheck size={12} />}{u.active ? "Disable" : "Enable"}</Btn>}
+                {can("employees", "delete") && <Btn size="xs" variant="danger" onClick={() => setDeleting(u)}><Trash2 size={12} /> Remove</Btn>}
+              </>}
+            </div>
           </div>
         ))}
       </div>
 
       <div className="card hidden overflow-hidden md:block">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px]">
+          <table className="w-full min-w-[980px]">
             <thead className="border-b border-ink-200/70 bg-ink-50/70 dark:border-ink-700 dark:bg-ink-800/50"><tr><th className="th">Employee</th><th className="th">Role</th><th className="th">Team</th><th className="th">Phone</th><th className="th">Last login</th><th className="th">Status</th><th className="th text-right">Actions</th></tr></thead>
             <tbody>{employees.map((u) => (
               <tr key={u.id} className="border-b border-ink-100/70 dark:border-ink-800">
-                <td className="td"><span className="flex items-center gap-2.5"><Avatar name={u.name} color={u.color} size={30} /><span><span className="block font-semibold text-ink-900 dark:text-ink-50">{u.name}</span><span className="block text-[11px] text-ink-400">{u.email}</span></span></span></td>
+                <td className="td"><button onClick={() => nav(`/profile/${u.id}`)} className="flex items-center gap-2.5 text-left hover:text-brand-600"><Avatar name={u.name} color={u.color} size={30} /><span><span className="block font-semibold text-ink-900 dark:text-ink-50">{u.name}</span><span className="block text-[11px] text-ink-400">{u.email}</span></span></button></td>
                 <td className="td"><Badge tone="violet">{roleName(u)}</Badge></td>
                 <td className="td text-[12px]">{teamName(u)}</td>
                 <td className="td text-[12px]">{u.phone || "—"}</td>
                 <td className="td text-[11.5px] text-ink-400">{u.lastLogin ? fmtDT(u.lastLogin) : "Never"}</td>
-                <td className="td"><Badge tone={u.active ? "green" : "red"}>{u.active ? "Active" : "Disabled"}</Badge></td>
+                <td className="td"><div className="flex flex-col items-start gap-1"><Badge tone={u.active ? "green" : "red"}>{u.active ? "Active" : "Disabled"}</Badge>{needsPassword(u) && <Badge tone="amber">Password change</Badge>}</div></td>
                 <td className="td"><div className="flex justify-end gap-1.5">
+                  <Btn size="xs" variant="soft" onClick={() => nav(`/profile/${u.id}`)}><Eye size={12} /> Profile</Btn>
                   {u.id === user!.id ? <Badge tone="blue">Current user</Badge> : <>
                     {can("employees", "edit") && <Btn size="xs" variant="outline" onClick={() => setEditing(u)}><Pencil size={12} /> Edit</Btn>}
+                    {can("employees", "edit") && <Btn size="xs" variant="outline" onClick={() => setResetting(u)}><KeyRound size={12} /> Reset</Btn>}
                     {can("employees", "edit") && <Btn size="xs" variant={u.active ? "ghost" : "soft"} disabled={busyId === u.id} onClick={() => void setActive(u, !u.active)}>{u.active ? "Disable" : "Enable"}</Btn>}
                     {can("employees", "delete") && <Btn size="xs" variant="danger" onClick={() => setDeleting(u)}><Trash2 size={12} /> Remove</Btn>}
                   </>}
@@ -291,6 +340,7 @@ export default function EmployeeManagement() {
 
       {adding && <EmployeeEditor key="new" open={adding} employee={null} onClose={() => setAdding(false)} />}
       {editing && <EmployeeEditor key={editing.id} open={!!editing} employee={editing} onClose={() => setEditing(null)} />}
+      <ResetPasswordModal employee={resetting} onClose={() => setResetting(null)} />
       <Modal open={!!deleting} onClose={() => setDeleting(null)} title="Remove employee" footer={
         <><Btn variant="ghost" onClick={() => setDeleting(null)}>Cancel</Btn><Btn variant="danger" loading={busyId === deleting?.id} onClick={() => void removeEmployee()}>Remove employee</Btn></>
       }>
