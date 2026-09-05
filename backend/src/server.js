@@ -1,6 +1,6 @@
 /**
  * ITCT CRM API — Node.js + Express + PostgreSQL.
- * Run:  npm start  (or: node src/server.js)  →  http://localhost:8000  ·  /docs-style routes under /api
+ * Run: npm start (or: node src/server.js) → http://localhost:8000
  */
 const express = require("express");
 const cors = require("cors");
@@ -11,6 +11,14 @@ const { router: crmRoutes, startDiscoveryWorker } = require("./routes/crm");
 
 const app = express();
 app.set("trust proxy", true);
+app.disable("x-powered-by");
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  next();
+});
 app.use(cors({ origin: config.corsOrigins, credentials: true }));
 app.use(express.json({ limit: "2mb" }));
 
@@ -29,6 +37,9 @@ app.get("/api/health", async (_req, res) => {
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api", crmRoutes);
 app.use("/api", require("./routes/billing"));
+// Mounted before the legacy analytics router so employee dashboard requests are
+// always ownership- and permission-scoped server-side.
+app.use("/api", require("./routes/dashboard"));
 app.use("/api", require("./routes/admin"));
 
 app.use("/api", (_req, res) => res.status(404).json({ detail: "Not Found" }));
