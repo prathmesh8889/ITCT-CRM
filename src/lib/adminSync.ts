@@ -45,7 +45,8 @@ export async function syncRoleSave(roleId: string, patch: Partial<Role>): Promis
 
 export async function syncRolePerms(roleId: string, perms: Record<string, string[]>): Promise<void> {
   if (DEMO_MODE) return;
-  await roleApi.setPermissions(nid(roleId), perms);
+  // Backend expects { perms: { module: [actions...] } }, not the raw map.
+  await roleApi.setPermissions(nid(roleId), { perms } as unknown as Record<string, string[]>);
 }
 
 export async function syncTeamCreate(t: { name: string; focus: string; memberIds: string[] }): Promise<void> {
