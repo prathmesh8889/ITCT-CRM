@@ -18,6 +18,7 @@ import Invoices from "./pages/Invoices";
 import Products from "./pages/Products";
 import Reports from "./pages/Reports";
 import Assistant from "./pages/Assistant";
+import EmployeeManagement from "./pages/EmployeeManagement";
 import { EmployeesPage, AutomationPage, AuditPage } from "./pages/Admin";
 import Settings from "./pages/Settings";
 import type { ModuleKey } from "./lib/types";
@@ -67,7 +68,8 @@ function Root() {
         <Route path="/products" element={<Guard mod="products"><Products /></Guard>} />
         <Route path="/reports" element={<Guard mod="reports"><Reports /></Guard>} />
         <Route path="/assistant" element={<Guard mod="ai"><Assistant /></Guard>} />
-        <Route path="/employees" element={<Guard mod="employees"><EmployeesPage /></Guard>} />
+        <Route path="/employees" element={<Guard mod="employees"><EmployeeManagement /></Guard>} />
+        <Route path="/access-settings" element={<Guard mod="employees"><EmployeesPage /></Guard>} />
         <Route path="/automation" element={<Guard mod="automation"><AutomationPage /></Guard>} />
         <Route path="/audit" element={<Guard mod="audit"><AuditPage /></Guard>} />
         <Route path="/settings" element={<Guard mod="settings"><Settings /></Guard>} />
