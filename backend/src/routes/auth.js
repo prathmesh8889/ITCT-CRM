@@ -1,13 +1,16 @@
 /**
- * Auth — login (throttled), refresh rotation with reuse detection, logout, me, change-password.
+ * Auth — password login, Google sign-in, refresh rotation, logout, me, change-password.
  */
 const express = require("express");
 const jwt = require("jsonwebtoken");
+const { OAuth2Client } = require("google-auth-library");
 const { db } = require("../db");
 const { config, HttpError, sha256 } = require("../core");
 const { hashPassword, verifyPassword, signAccess, signRefresh, newRefreshHash, requireAuth } = require("../security");
 
 const router = express.Router();
+const GOOGLE_CLIENT_ID = String(process.env.GOOGLE_CLIENT_ID || "").trim();
+const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 
 // Failed-login throttle: keyed by normalized email + IP, stale entries cleaned.
 // Production: move to Redis/shared store for multi-instance deployments.
@@ -24,6 +27,16 @@ setInterval(() => {
 const audit = (userId, userName, action, target, detail = "") =>
   db.query("INSERT INTO audit_logs (user_id, user_name, action, target, detail) VALUES ($1,$2,$3,$4,$5)",
     [userId, userName, action, target, detail]);
+
+async function issueSession(user, detail = "Successful login") {
+  const role = await db.one("SELECT * FROM roles WHERE id = $1", [user.role_id]);
+  const refresh = signRefresh(user);
+  await db.query("INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1,$2,$3)",
+    [user.id, sha256(refresh), new Date(Date.now() + config.refreshDays * 86400_000)]);
+  await db.query("UPDATE users SET last_login_at = now() WHERE id = $1", [user.id]);
+  await audit(user.id, user.name, "Login", "auth", detail);
+  return { access_token: signAccess(user, role?.name || ""), refresh_token: refresh, token_type: "bearer" };
+}
 
 router.post("/login", async (req, res, next) => {
   try {
@@ -47,14 +60,44 @@ router.post("/login", async (req, res, next) => {
       throw new HttpError(403, "Account is disabled. Contact your admin.");
     }
 
-    const role = await db.one("SELECT * FROM roles WHERE id = $1", [user.role_id]);
-    const refresh = signRefresh(user);
-    await db.query("INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1,$2,$3)",
-      [user.id, sha256(refresh), new Date(Date.now() + config.refreshDays * 86400_000)]);
-    await db.query("UPDATE users SET last_login_at = now() WHERE id = $1", [user.id]);
     failed.delete(key);
-    await audit(user.id, user.name, "Login", "auth", "Successful login");
-    res.json({ access_token: signAccess(user, role?.name || ""), refresh_token: refresh, token_type: "bearer" });
+    res.json(await issueSession(user, "Successful password login"));
+  } catch (e) { next(e); }
+});
+
+// Google Identity Services sends an ID token (credential). Google proves the
+// identity; ITCT CRM still decides authorization. We NEVER auto-create users:
+// the verified email must already belong to an active CRM employee.
+router.post("/google", async (req, res, next) => {
+  try {
+    if (!googleClient || !GOOGLE_CLIENT_ID)
+      throw new HttpError(503, "Google sign-in is not configured by the CRM administrator");
+    const credential = String(req.body?.credential || "").trim();
+    if (!credential) throw new HttpError(422, "Google credential is required");
+
+    let payload;
+    try {
+      const ticket = await googleClient.verifyIdToken({ idToken: credential, audience: GOOGLE_CLIENT_ID });
+      payload = ticket.getPayload();
+    } catch {
+      throw new HttpError(401, "Google sign-in could not be verified");
+    }
+
+    const email = String(payload?.email || "").trim().toLowerCase();
+    if (!email || payload?.email_verified !== true)
+      throw new HttpError(401, "Google account email is not verified");
+
+    const user = await db.one("SELECT * FROM users WHERE email = $1 AND deleted_at IS NULL", [email]);
+    if (!user) {
+      await audit(null, email, "Failed Google Login", "auth", "Google email is not provisioned in CRM");
+      throw new HttpError(403, "No CRM employee account is linked to this Google email. Ask your admin to create the employee first.");
+    }
+    if (!user.active) {
+      await audit(user.id, user.name, "Failed Google Login", "auth", "Account disabled");
+      throw new HttpError(403, "Account is disabled. Contact your admin.");
+    }
+
+    res.json(await issueSession(user, "Successful Google login"));
   } catch (e) { next(e); }
 });
 
