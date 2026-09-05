@@ -23,7 +23,7 @@ test("computeTotals applies per-line discount then GST", () => {
   ]);
   assert.strictEqual(t.subtotal, 25000);
   assert.strictEqual(t.discount_total, 2000);
-  assert.strictEqual(t.tax_total, 4140);           // (20000-2000 + 5000) * 18%
+  assert.strictEqual(t.tax_total, 4140);
   assert.strictEqual(t.grand_total, 27140);
 });
 
@@ -137,6 +137,21 @@ test("refresh tokens are unique even when created in the same second", () => {
   const { signRefresh } = require("../src/security");
   const user = { id: 123 };
   assert.notStrictEqual(signRefresh(user), signRefresh(user));
+});
+
+test("employee login tolerates accidental email whitespace and each employee has an isolated throttle key", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const auth = fs.readFileSync(path.join(__dirname, "..", "src", "routes", "auth.js"), "utf8");
+  assert.match(auth, /LOWER\(BTRIM\(email\)\) = \$1/);
+  assert.match(auth, /const key = `\$\{email\}\|\$\{req\.ip \|\| ""\}`/);
+});
+
+test("new employee sync trims and lowercases email before PostgreSQL write", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const sync = fs.readFileSync(path.join(__dirname, "..", "..", "src", "lib", "adminSync.ts"), "utf8");
+  assert.match(sync, /email: u\.email\.trim\(\)\.toLowerCase\(\)/);
 });
 
 test("local frontend origin is allowed by the example CORS configuration", () => {
