@@ -92,6 +92,13 @@ async function cleanupDemoData() {
       await c.query("UPDATE leads SET assigned_team_id = NULL WHERE assigned_team_id = ANY($1::int[]) AND NOT (id = ANY($2::int[]))", [demoTeams, demoLeads]);
     }
 
+    // Assignment history can reference seeded users/teams even when the lead itself is real.
+    if (any(demoUsers) || any(demoTeams)) {
+      await del("lead_assignments_demo_refs",
+        "DELETE FROM lead_assignments WHERE user_id = ANY($1::int[]) OR team_id = ANY($2::int[])",
+        [demoUsers, demoTeams]);
+    }
+
     // Delete seeded business records in FK-safe order.
     await del("payments", "DELETE FROM payments WHERE payment_number LIKE 'PAY-SEED-%'");
     await del("invoices", "DELETE FROM invoices WHERE invoice_number LIKE 'INV-SEED-%'");
