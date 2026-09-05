@@ -4,12 +4,8 @@
  * PRODUCTION (default): users, sessions and permissions come from the Node.js
  * (Express + PostgreSQL) backend (POST /auth/login → JWT pair, GET /auth/me →
  * user + perms). No local credential checks, no localStorage business data.
- * After login the store hydrates every collection from PostgreSQL.
- *
- * DEMO MODE (VITE_DEMO_MODE=true, dev only): browser-embedded workspace, clearly
- * labelled in the UI. Never active by default.
  */
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { getDB, hashPass, mutate, uid } from "./lib/db";
 import { logAudit, runSweeps, resumeStaleJobs } from "./lib/services";
@@ -20,6 +16,13 @@ import type { MeResponse } from "./lib/apiTypes";
 import type { ModuleKey, Perm, User } from "./lib/types";
 
 const SKEY = "itct.session"; // demo mode only
+
+type SecureUser = User & { mustChangePassword?: boolean };
+const mapMeUser = (me: MeResponse): SecureUser => {
+  const u = fromApiUser(me.user) as SecureUser;
+  u.mustChangePassword = !!(me.user as typeof me.user & { must_change_password?: boolean }).must_change_password;
+  return u;
+};
 
 export interface Toast { id: string; title: string; body?: string; kind: "ok" | "err" | "info" | "warn"; }
 
@@ -55,7 +58,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const mode: "backend" | "demo" = DEMO_MODE ? "demo" : "backend";
   const retryBoot = useCallback(() => { setBooting(true); setServerDown(false); setBootKey((k) => k + 1); }, []);
 
-  // demo-mode boot: sweeps + stored demo session
   useEffect(() => {
     if (!DEMO_MODE) return;
     runSweeps();
@@ -74,7 +76,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setBooting(false);
   }, [bootKey]);
 
-  // production boot: probe server → access token → GET /auth/me → hydrate from PostgreSQL
+  // Production boot: if a temporary password is active, do NOT hydrate CRM data.
   useEffect(() => {
     if (DEMO_MODE) return;
     let live = true;
@@ -86,14 +88,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (hasSession()) {
         try {
           const me = (await authApi.me()).data as MeResponse;
-          await hydrateFromBackend(me.perms || {}, me.is_super);
+          const mapped = mapMeUser(me);
+          if (!mapped.mustChangePassword) await hydrateFromBackend(me.perms || {}, me.is_super);
           if (!live) return;
-          setUser(fromApiUser(me.user));
+          setUser(mapped);
           setPerms(me.perms || {});
           setIsSuper(me.is_super);
           setRoleName(me.role || "");
         } catch {
-          clearTokens(); // refresh failed → back to login
+          clearTokens();
         }
       }
       setBooting(false);
@@ -107,8 +110,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const r = await authApi.login(email.trim(), pw);
         setTokens(r.data.access_token, r.data.refresh_token);
         const me = (await authApi.me()).data as MeResponse;
-        await hydrateFromBackend(me.perms || {}, me.is_super); // load only modules this role can view
-        setUser(fromApiUser(me.user));
+        const mapped = mapMeUser(me);
+        if (!mapped.mustChangePassword) await hydrateFromBackend(me.perms || {}, me.is_super);
+        setUser(mapped);
         setPerms(me.perms || {});
         setIsSuper(me.is_super);
         setRoleName(me.role || "");
@@ -117,7 +121,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return { ok: false, error: e instanceof Error ? e.message : "Login failed." };
       }
     }
-    // ---- demo mode only: embedded workspace credentials ----
+
     const d = getDB();
     const u = d.users.find((x) => x.email.toLowerCase() === email.trim().toLowerCase());
     if (!u) { logAudit("system", "Failed Login", "auth", `Unknown email ${email}`); return { ok: false, error: "No account found for this email." }; }
