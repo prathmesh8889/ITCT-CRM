@@ -1,7 +1,7 @@
 /**
- * Dashboard — PRODUCTION: every figure comes from the FastAPI backend
- * (GET /api/dashboard, /dashboard/hot-leads, /dashboard/agenda, /dashboard/activity,
- *  /reports/leads). DEMO MODE only: embedded sample data, clearly labelled.
+ * Dashboard — PRODUCTION: live data from the Node.js/Express backend.
+ * Core dashboard widgets require dashboard:view. Optional lead-source analytics
+ * are loaded only when the signed-in role also has reports:view.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -55,16 +55,26 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [data, setData] = useState<DashData | null>(null);
+  const canViewReports = can("reports", "view");
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
     if (!DEMO_MODE) {
       try {
-        const [dash, hot, agenda, activity, rep] = await Promise.all([
-          dashboardApi.get(), dashboardApi.hotLeads(), dashboardApi.agenda(),
-          dashboardApi.activity(), reportApi.leads({ page_size: 1 }),
+        const [dash, hot, agenda, activity] = await Promise.all([
+          dashboardApi.get(), dashboardApi.hotLeads(), dashboardApi.agenda(), dashboardApi.activity(),
         ]);
-        const bySource = (rep.data as { by_source?: Record<string, number> }).by_source || {};
+        let bySource: Record<string, number> = {};
+        if (canViewReports) {
+          try {
+            const rep = await reportApi.leads({ page_size: 1 });
+            bySource = (rep.data as { by_source?: Record<string, number> }).by_source || {};
+          } catch {
+            // Reports analytics are optional on the dashboard. A report permission
+            // issue must never make the whole employee dashboard look offline.
+            bySource = {};
+          }
+        }
         setData({
           kpi: fromApiDashboard(dash.data as ApiDashboard),
           hot: (hot.data as ApiHotLead[]).map(fromApiHotLead),
@@ -97,7 +107,7 @@ export default function Dashboard() {
       sources: (() => { const mp = new Map<string, number>(); d.leads.forEach((l) => mp.set(l.source, (mp.get(l.source) || 0) + 1)); return [...mp.entries()].map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 7); })(),
     });
     setLoading(false);
-  }, []);
+  }, [canViewReports]);
 
   useEffect(() => { if (!booting) void load(); }, [booting, load]);
 
@@ -121,8 +131,8 @@ export default function Dashboard() {
     return (
       <div className="mx-auto flex max-w-[1400px] flex-col items-center justify-center p-10 text-center">
         <span className="flex h-14 w-14 items-center justify-center rounded-full border border-dashed border-red-300 text-red-500"><ServerCrash size={26} /></span>
-        <h1 className="hd mt-4 text-[20px]">CRM server is unavailable</h1>
-        <p className="mt-1 max-w-md text-[13px] text-ink-500">{error} — your data is safe in PostgreSQL. Start the backend (<span className="num">uvicorn app.main:app --reload --port 8000</span>) and retry. Nothing was written locally.</p>
+        <h1 className="hd mt-4 text-[20px]">Unable to load dashboard</h1>
+        <p className="mt-1 max-w-md text-[13px] text-ink-500">{error} — check your connection and assigned CRM permissions, then retry.</p>
         <Btn className="mt-4" onClick={() => void load()}><RefreshCw size={14} /> Retry connection</Btn>
       </div>
     );
@@ -148,7 +158,7 @@ export default function Dashboard() {
         <StatTile delay={0} label="Total Leads" value={String(k!.totalLeads)} sub={`${k!.newLeads} new`} icon={Target} onClick={() => nav("/leads")} />
         <StatTile delay={40} label="Hot Leads" value={String(k!.hot)} sub="act within 48h" icon={Flame} tone="red" onClick={() => nav("/leads?filter=hot")} />
         <StatTile delay={80} label="Qualified" value={String(k!.qualified)} sub={`${k!.converted} converted`} icon={FilterIcon} tone="slate" onClick={() => nav("/leads")} />
-        <StatTile delay={120} label="Conversion" value={`${k!.conversionRate}%`} sub={`win rate ${k!.winRate}%`} icon={TrendingUp} tone="green" onClick={() => nav("/reports")} />
+        <StatTile delay={120} label="Conversion" value={`${k!.conversionRate}%`} sub={`win rate ${k!.winRate}%`} icon={TrendingUp} tone="green" onClick={() => canViewReports && nav("/reports")} />
         <StatTile delay={160} label="Customers" value={String(k!.customers)} sub="active accounts" icon={Users} onClick={() => nav("/customers")} />
         <StatTile delay={200} label="Pipeline" value={inr(k!.pipelineValue)} sub="open deals" icon={Briefcase} onClick={() => nav("/pipeline")} />
         <StatTile delay={240} label="Revenue (month)" value={inr(k!.revenue)} sub="payments received" icon={Wallet} tone="green" onClick={() => nav("/invoices?tab=payments")} />
@@ -179,7 +189,7 @@ export default function Dashboard() {
         <Reveal delay={200}>
           <div className="card flex h-full flex-col p-4">
             <h3 className="hd text-[15px]">Lead Sources</h3>
-            <p className="text-[11.5px] text-ink-400">Where leads come from</p>
+            <p className="text-[11.5px] text-ink-400">{canViewReports ? "Where leads come from" : "Reports permission required for source analytics"}</p>
             <div className="min-h-0 flex-1">
               <ResponsiveContainer width="100%" height={210}>
                 <PieChart>
