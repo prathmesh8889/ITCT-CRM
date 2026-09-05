@@ -8,8 +8,10 @@ const { config, HttpError, sha256 } = require("../core");
 const { hashPassword, verifyPassword, signAccess, signRefresh, newRefreshHash, requireAuth } = require("../security");
 
 const router = express.Router();
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
 // Failed-login throttle: keyed by normalized email + IP, stale entries cleaned.
+// Different employees on the same office/network IP are isolated because email is part of the key.
 // Production: move to Redis/shared store for multi-instance deployments.
 const failed = new Map();
 const MAX_ATTEMPTS = 5, WINDOW_MS = 5 * 60_000;
@@ -27,7 +29,7 @@ const audit = (userId, userName, action, target, detail = "") =>
 
 router.post("/login", async (req, res, next) => {
   try {
-    const email = String(req.body?.email || "").trim().toLowerCase();
+    const email = normalizeEmail(req.body?.email);
     const password = String(req.body?.password || "");
     if (!email || !password) throw new HttpError(422, "Email and password are required");
     const key = `${email}|${req.ip || ""}`;
@@ -36,7 +38,12 @@ router.post("/login", async (req, res, next) => {
     if (attempts.length >= MAX_ATTEMPTS)
       throw new HttpError(429, "Too many failed attempts. Try again in 5 minutes.");
 
-    const user = await db.one("SELECT * FROM users WHERE email = $1 AND deleted_at IS NULL", [email]);
+    // BTRIM + LOWER also lets legacy employee rows created with accidental
+    // leading/trailing spaces in the email continue to sign in correctly.
+    const user = await db.one(
+      "SELECT * FROM users WHERE LOWER(BTRIM(email)) = $1 AND deleted_at IS NULL ORDER BY id LIMIT 1",
+      [email],
+    );
     if (!user || !verifyPassword(password, user.password_hash)) {
       attempts.push(Date.now()); failed.set(key, attempts);
       await audit(user?.id ?? null, user?.name ?? email, "Failed Login", "auth", "Invalid credentials");
@@ -73,7 +80,6 @@ router.post("/refresh", async (req, res, next) => {
     }
     const user = await db.one("SELECT * FROM users WHERE id = $1 AND deleted_at IS NULL", [row.user_id]);
     if (!user || !user.active) throw new HttpError(401, "Account is disabled");
-    row.revoked = true;
     await db.query("UPDATE refresh_tokens SET revoked = TRUE WHERE id = $1", [row.id]); // rotation
     const refresh = signRefresh(user);
     await db.query("INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1,$2,$3)",
