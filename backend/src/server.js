@@ -7,6 +7,7 @@ const cors = require("cors");
 const { db, initSchema } = require("./db");
 const { config, HttpError } = require("./core");
 const { sweepOverdueInvoices } = require("./engines");
+const { cleanupDemoData } = require("./cleanup-demo");
 const { router: crmRoutes, startDiscoveryWorker } = require("./routes/crm");
 
 const app = express();
@@ -62,6 +63,12 @@ async function main() {
       console.error(`[boot] FATAL — cannot reach PostgreSQL at ${config.databaseUrl}\n       ${e.message}`);
       process.exit(1);
     }
+  }
+  try {
+    const result = await cleanupDemoData();
+    console.log(`[boot] demo cleanup: ${JSON.stringify(result)}`);
+  } catch (e) {
+    console.error("[boot] demo cleanup failed (continuing):", e.message);
   }
   try {
     const swept = await sweepOverdueInvoices();
