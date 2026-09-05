@@ -5,7 +5,10 @@ import { StoreProvider, useStore } from "./store";
 import { Btn } from "./components/ui";
 import { PrintProvider, ToastHost } from "./components/ui";
 import AppLayout from "./components/layout";
+import ProfileShortcut from "./components/ProfileShortcut";
 import Login from "./pages/Login";
+import ChangePassword from "./pages/ChangePassword";
+import UserProfile from "./pages/UserProfile";
 import Dashboard from "./pages/Dashboard";
 import Leads from "./pages/Leads";
 import Discovery from "./pages/Discovery";
@@ -43,16 +46,22 @@ function Guard({ mod, children }: { mod: ModuleKey; children: ReactElement }) {
 
 function LoginGate() {
   const { user } = useStore();
-  if (user) return <Navigate to="/dashboard" replace />;
+  if (user) {
+    const mustChange = !!(user as typeof user & { mustChangePassword?: boolean }).mustChangePassword;
+    return <Navigate to={mustChange ? "/change-password" : "/dashboard"} replace />;
+  }
   return <Login />;
 }
 
 function Root() {
   const { user } = useStore();
+  const mustChange = !!(user as (typeof user & { mustChangePassword?: boolean }))?.mustChangePassword;
   return (
     <Routes>
       <Route path="/login" element={<LoginGate />} />
-      <Route element={user ? <AppLayout /> : <Navigate to="/login" replace />}>
+      <Route path="/change-password" element={user ? <ChangePassword /> : <Navigate to="/login" replace />} />
+      <Route element={user ? (mustChange ? <Navigate to="/change-password" replace /> : <AppLayout />) : <Navigate to="/login" replace />}>
+        <Route path="/profile/:id" element={<UserProfile />} />
         <Route path="/dashboard" element={<Guard mod="dashboard"><Dashboard /></Guard>} />
         <Route path="/leads" element={<Guard mod="leads"><Leads /></Guard>} />
         <Route path="/discovery" element={<Guard mod="discovery"><Discovery /></Guard>} />
@@ -107,6 +116,7 @@ export default function App() {
       <PrintProvider>
         <HashRouter>
           <ServerDownGate><Root /></ServerDownGate>
+          <ProfileShortcut />
           <ToastBridge />
         </HashRouter>
       </PrintProvider>
