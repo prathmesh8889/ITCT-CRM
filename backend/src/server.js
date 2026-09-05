@@ -27,7 +27,13 @@ app.use(express.json({ limit: "2mb" }));
 app.get("/api/health", async (_req, res) => {
   try {
     await db.query("SELECT 1");
-    res.json({ status: "ok", database: "connected", version: config.version });
+    const cleanup = await db.one("SELECT value FROM crm_settings WHERE key = 'demo_cleanup_v1'");
+    res.json({
+      status: "ok",
+      database: "connected",
+      version: config.version,
+      demo_data: cleanup ? "clean" : "pending_cleanup",
+    });
   } catch (e) {
     console.error("[health] database check failed:", e.message);
     res.status(503).json({ status: "degraded", database: "disconnected", version: config.version });
