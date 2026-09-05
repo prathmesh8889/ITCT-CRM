@@ -1,8 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type { DB } from "./types";
-import { buildSeed } from "./seed";
 
-const KEY = "itct.db.v1";
+const KEY = "itct.db.v2";
 
 export function uid(): string {
   return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -20,17 +19,48 @@ export function hashPass(pw: string): string {
   return (h2 >>> 0).toString(16).padStart(8, "0") + (h1 >>> 0).toString(16).padStart(8, "0");
 }
 
+function blankDB(): DB {
+  return {
+    v: 2,
+    users: [], roles: [], teams: [],
+    leads: [], leadSources: [], leadStatuses: [], discoveryJobs: [],
+    customers: [], companies: [], contacts: [],
+    deals: [], dealStages: [],
+    followups: [], calls: [], meetings: [], tasks: [], notes: [],
+    products: [], quotations: [], invoices: [], payments: [], expenses: [],
+    activities: [], notices: [], auditLogs: [],
+    rules: [], ruleRuns: [], templates: [], aiLogs: [],
+    settings: {
+      company: {
+        name: "ITCT CRM", tagline: "", email: "", phone: "", website: "", address: "",
+        gstin: "", pan: "", currency: "INR", timezone: "Asia/Kolkata", logoMark: "I",
+      },
+      ai: { url: "http://localhost:11434", model: "qwen3", temperature: 0.4, timeoutSec: 30 },
+      scoring: {
+        phone: 10, email: 10, website: 10, location: 10, industry: 15, rating: 5, engagement: 20,
+        targetLocations: [], targetIndustries: [],
+      },
+      assignment: {
+        strategy: "round_robin", rrPointer: 0, highValueThreshold: 100000, highValueUserId: "",
+        categoryMap: {}, locationMap: {},
+      },
+    },
+  };
+}
+
 function load(): DB {
   try {
+    // Remove the old browser-only demo database from previous builds.
+    localStorage.removeItem("itct.db.v1");
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as DB;
-      if (parsed && parsed.v === 1 && Array.isArray(parsed.leads)) return parsed;
+      if (parsed && parsed.v === 2 && Array.isArray(parsed.leads)) return parsed;
     }
-  } catch { /* corrupted -> reseed */ }
-  const seeded = buildSeed();
-  try { localStorage.setItem(KEY, JSON.stringify(seeded)); } catch { /* storage full */ }
-  return seeded;
+  } catch { /* corrupted -> blank workspace */ }
+  const clean = blankDB();
+  try { localStorage.setItem(KEY, JSON.stringify(clean)); } catch { /* storage full */ }
+  return clean;
 }
 
 let state: DB = load();
@@ -62,7 +92,7 @@ export function useDB(): DB {
 }
 
 export function resetDB(): void {
-  state = buildSeed();
+  state = blankDB();
   commit();
 }
 
