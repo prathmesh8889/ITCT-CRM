@@ -1,8 +1,7 @@
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import type { ReactElement } from "react";
-import { ShieldAlert, ServerCrash, RefreshCw, FlaskConical } from "lucide-react";
+import { ShieldAlert, ServerCrash, RefreshCw } from "lucide-react";
 import { StoreProvider, useStore } from "./store";
-import { enableDemo } from "./lib/api";
 import { Btn } from "./components/ui";
 import { PrintProvider, ToastHost } from "./components/ui";
 import AppLayout from "./components/layout";
@@ -80,11 +79,7 @@ function Root() {
   );
 }
 
-/**
- * Production guard: when the CRM backend (Node.js + PostgreSQL) is unreachable
- * we never silently fall back to browser data. The user can retry, or
- * explicitly open the labelled demo workspace.
- */
+/** Production guard: never fall back to browser/demo data when the API is down. */
 function ServerDownGate({ children }: { children: ReactElement }) {
   const { serverDown, retryBoot, booting } = useStore();
   if (!serverDown) return children;
@@ -96,19 +91,10 @@ function ServerDownGate({ children }: { children: ReactElement }) {
         </span>
         <h1 className="hd mt-4 text-[20px]">CRM server is unavailable</h1>
         <p className="mt-2 text-[13px] leading-relaxed text-ink-500">
-          The frontend can't reach <span className="num">http://localhost:8000</span>. Your data is safe in
-          PostgreSQL — start the backend and retry. Nothing will be written to this browser in the meantime.
+          The CRM API cannot be reached right now. Your production data remains in PostgreSQL. Retry after the backend is available.
         </p>
-        <div className="mt-4 rounded-md bg-ink-50 p-3 text-left dark:bg-ink-800/60">
-          <div className="num text-[11px] leading-relaxed text-ink-500">
-            cd backend<br />npm start&nbsp;&nbsp;:: node src/server.js
-          </div>
-        </div>
         <div className="mt-5 flex flex-col gap-2">
           <Btn onClick={retryBoot} loading={booting}><RefreshCw size={14} /> Retry connection</Btn>
-          <Btn variant="outline" onClick={() => { enableDemo(); retryBoot(); }}>
-            <FlaskConical size={14} /> Open demo workspace (browser-only, labelled)
-          </Btn>
         </div>
       </div>
     </div>
