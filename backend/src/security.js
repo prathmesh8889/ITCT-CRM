@@ -18,8 +18,6 @@ const signRefresh = (user) =>
   jwt.sign({
     sub: String(user.id),
     type: "refresh",
-    // A random nonce guarantees token rotation produces a distinct token even
-    // when login/refresh happens within the same second.
     nonce: crypto.randomBytes(16).toString("hex"),
   }, config.jwtSecret, { expiresIn: `${config.refreshDays}d` });
 const newRefreshHash = () => sha256(crypto.randomBytes(32).toString("hex"));
@@ -49,6 +47,14 @@ async function requireAuth(req, _res, next) {
     if (!user || !user.active || user.deleted_at) throw new HttpError(401, "Account is disabled");
     const role = await db.one("SELECT * FROM roles WHERE id = $1", [user.role_id]);
     if (!role) throw new HttpError(403, "Role missing");
+
+    // A temporary/reset password can authenticate only to auth endpoints needed
+    // to inspect the session, change the password, or sign out. CRM data stays locked.
+    if (user.must_change_password) {
+      const allowed = req.baseUrl === "/api/auth" && ["/me", "/change-password", "/logout"].includes(req.path);
+      if (!allowed) throw new HttpError(403, "Password change required before accessing CRM data");
+    }
+
     req.user = user;
     req.role = role;
     next();
