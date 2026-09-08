@@ -10,6 +10,7 @@ const { ensureAccessLevelSchema } = require("./access-levels");
 const { ensureOrganizationSchema } = require("./organization-schema");
 const { ensureWorkforceRoleSchema } = require("./workforce-role-schema");
 const { ensureWorkforceDomainSchema } = require("./workforce-domain-schema");
+const { ensureTeamSchema } = require("./team-schema");
 const { internSanitizer } = require("./intern-sanitizer");
 const { router: crmRoutes, startDiscoveryWorker } = require("./routes/crm");
 
@@ -52,6 +53,7 @@ app.use("/api", require("./routes/calendar-view"));
 app.use("/api", require("./routes/company-settings"));
 app.use("/api", require("./routes/workforce-roles"));
 app.use("/api", require("./routes/department-catalog-view"));
+app.use("/api", require("./routes/workforce-teams"));
 app.use("/api", require("./routes/department-directory"));
 app.use("/api", require("./routes/user-workforce"));
 app.use("/api", require("./routes/department-members"));
@@ -78,6 +80,7 @@ async function main() {
       await ensureOrganizationSchema();
       await ensureWorkforceRoleSchema();
       await ensureWorkforceDomainSchema();
+      await ensureTeamSchema();
       console.log("[boot] schema ready (CREATE/ALTER IF NOT EXISTS)");
     } catch (e) {
       console.error(`[boot] FATAL — cannot reach PostgreSQL at ${config.databaseUrl}\n       ${e.message}`);
@@ -89,6 +92,7 @@ async function main() {
     await ensureOrganizationSchema();
     await ensureWorkforceRoleSchema();
     await ensureWorkforceDomainSchema();
+    await ensureTeamSchema();
   }
   try {
     const result = await cleanupDemoData();
