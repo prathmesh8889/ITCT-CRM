@@ -5,10 +5,12 @@ import { StoreProvider, useStore } from "./store";
 import { Btn, PrintProvider, ToastHost } from "./components/ui";
 import AppLayout from "./components/layout";
 import CompanyDetailsEditor from "./components/CompanyDetailsEditor";
+import DepartmentWorkspaceLauncher from "./components/DepartmentWorkspaceLauncher";
 import Login from "./pages/Login";
 import ChangePassword from "./pages/ChangePassword";
 import UserProfile from "./pages/UserProfile";
 import Dashboard from "./pages/Dashboard";
+import DepartmentWorkspace from "./pages/DepartmentWorkspace";
 import Leads from "./pages/Leads";
 import Discovery from "./pages/Discovery";
 import Pipeline from "./pages/Pipeline";
@@ -27,15 +29,7 @@ import Settings from "./pages/Settings";
 import type { ModuleKey } from "./lib/types";
 
 function NoAccess() {
-  return (
-    <div className="flex h-full items-center justify-center p-6">
-      <div className="card a-scale-in max-w-sm p-8 text-center">
-        <ShieldAlert size={30} className="mx-auto text-amber-500" />
-        <h2 className="hd mt-3 text-[17px]">No permission</h2>
-        <p className="mt-1 text-[13px] text-ink-500">This module is not available to your current Workforce OS role. Access is controlled by the approved organizational policy.</p>
-      </div>
-    </div>
-  );
+  return <div className="flex h-full items-center justify-center p-6"><div className="card a-scale-in max-w-sm p-8 text-center"><ShieldAlert size={30} className="mx-auto text-amber-500"/><h2 className="hd mt-3 text-[17px]">No permission</h2><p className="mt-1 text-[13px] text-ink-500">This module is not available to your current Workforce OS role. Access is controlled by the approved organizational policy.</p></div></div>;
 }
 
 function Guard({ mod, children }: { mod: ModuleKey; children: ReactElement }) {
@@ -57,71 +51,50 @@ function LoginGate() {
 function Root() {
   const { user } = useStore();
   const mustChange = !!(user as (typeof user & { mustChangePassword?: boolean }))?.mustChangePassword;
-  return (
-    <Routes>
-      <Route path="/login" element={<LoginGate />} />
-      <Route path="/change-password" element={user ? <ChangePassword /> : <Navigate to="/login" replace />} />
-      <Route element={user ? (mustChange ? <Navigate to="/change-password" replace /> : <AppLayout />) : <Navigate to="/login" replace />}>
-        <Route path="/profile/:id" element={<UserProfile />} />
-        <Route path="/dashboard" element={<Guard mod="dashboard"><Dashboard /></Guard>} />
-        <Route path="/leads" element={<Guard mod="leads"><Leads /></Guard>} />
-        <Route path="/discovery" element={<Guard mod="discovery"><Discovery /></Guard>} />
-        <Route path="/pipeline" element={<Guard mod="deals"><Pipeline /></Guard>} />
-        <Route path="/customers" element={<Guard mod="customers"><Relations /></Guard>} />
-        <Route path="/followups" element={<Guard mod="followups"><FollowUps /></Guard>} />
-        <Route path="/tasks" element={<Guard mod="tasks"><TasksPage /></Guard>} />
-        <Route path="/meetings" element={<Guard mod="meetings"><MeetingsPage /></Guard>} />
-        <Route path="/calendar" element={<CalendarPage />} />
-        <Route path="/quotations" element={<Guard mod="quotations"><Quotations /></Guard>} />
-        <Route path="/invoices" element={<Guard mod="invoices"><Invoices /></Guard>} />
-        <Route path="/products" element={<Guard mod="products"><Products /></Guard>} />
-        <Route path="/reports" element={<Guard mod="reports"><Reports /></Guard>} />
-        <Route path="/assistant" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/employees" element={<Guard mod="employees"><EmployeeManagement /></Guard>} />
-        <Route path="/access-levels" element={<Guard mod="employees"><AccessLevels /></Guard>} />
-        <Route path="/departments" element={<Guard mod="employees"><Departments /></Guard>} />
-        {/* Legacy manual role/permission editor retired in Step 3. */}
-        <Route path="/access-settings" element={<Navigate to="/departments" replace />} />
-        <Route path="/automation" element={<Guard mod="automation"><AutomationPage /></Guard>} />
-        <Route path="/audit" element={<Guard mod="audit"><AuditPage /></Guard>} />
-        <Route path="/settings" element={<Guard mod="settings"><Settings /></Guard>} />
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Route>
-    </Routes>
-  );
+  return <Routes>
+    <Route path="/login" element={<LoginGate/>}/>
+    <Route path="/change-password" element={user ? <ChangePassword/> : <Navigate to="/login" replace/>}/>
+    <Route element={user ? (mustChange ? <Navigate to="/change-password" replace/> : <AppLayout/>) : <Navigate to="/login" replace/>}>
+      <Route path="/profile/:id" element={<UserProfile/>}/>
+      <Route path="/dashboard" element={<Guard mod="dashboard"><Dashboard/></Guard>}/>
+      <Route path="/department-workspace" element={<DepartmentWorkspace/>}/>
+      <Route path="/leads" element={<Guard mod="leads"><Leads/></Guard>}/>
+      <Route path="/discovery" element={<Guard mod="discovery"><Discovery/></Guard>}/>
+      <Route path="/pipeline" element={<Guard mod="deals"><Pipeline/></Guard>}/>
+      <Route path="/customers" element={<Guard mod="customers"><Relations/></Guard>}/>
+      <Route path="/followups" element={<Guard mod="followups"><FollowUps/></Guard>}/>
+      <Route path="/tasks" element={<Guard mod="tasks"><TasksPage/></Guard>}/>
+      <Route path="/meetings" element={<Guard mod="meetings"><MeetingsPage/></Guard>}/>
+      <Route path="/calendar" element={<CalendarPage/>}/>
+      <Route path="/quotations" element={<Guard mod="quotations"><Quotations/></Guard>}/>
+      <Route path="/invoices" element={<Guard mod="invoices"><Invoices/></Guard>}/>
+      <Route path="/products" element={<Guard mod="products"><Products/></Guard>}/>
+      <Route path="/reports" element={<Guard mod="reports"><Reports/></Guard>}/>
+      <Route path="/assistant" element={<Navigate to="/dashboard" replace/>}/>
+      <Route path="/employees" element={<Guard mod="employees"><EmployeeManagement/></Guard>}/>
+      <Route path="/access-levels" element={<Guard mod="employees"><AccessLevels/></Guard>}/>
+      <Route path="/departments" element={<Guard mod="employees"><Departments/></Guard>}/>
+      <Route path="/access-settings" element={<Navigate to="/departments" replace/>}/>
+      <Route path="/automation" element={<Guard mod="automation"><AutomationPage/></Guard>}/>
+      <Route path="/audit" element={<Guard mod="audit"><AuditPage/></Guard>}/>
+      <Route path="/settings" element={<Guard mod="settings"><Settings/></Guard>}/>
+      <Route path="/" element={<Navigate to="/dashboard" replace/>}/>
+      <Route path="*" element={<Navigate to="/dashboard" replace/>}/>
+    </Route>
+  </Routes>;
 }
 
 function ServerDownGate({ children }: { children: ReactElement }) {
   const { serverDown, retryBoot, booting } = useStore();
   if (!serverDown) return children;
-  return (
-    <div className="dot-grid flex min-h-screen items-center justify-center bg-paper p-6 dark:bg-[#0b1013]">
-      <div className="card a-scale-in w-full max-w-md p-8 text-center">
-        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-dashed border-red-300 text-red-500 dark:border-red-900"><ServerCrash size={26} /></span>
-        <h1 className="hd mt-4 text-[20px]">CRM server is unavailable</h1>
-        <p className="mt-2 text-[13px] leading-relaxed text-ink-500">The CRM API cannot be reached right now. Your production data remains in PostgreSQL. Retry after the backend is available.</p>
-        <div className="mt-5 flex flex-col gap-2"><Btn onClick={retryBoot} loading={booting}><RefreshCw size={14} /> Retry connection</Btn></div>
-      </div>
-    </div>
-  );
+  return <div className="dot-grid flex min-h-screen items-center justify-center bg-paper p-6 dark:bg-[#0b1013]"><div className="card a-scale-in w-full max-w-md p-8 text-center"><span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-dashed border-red-300 text-red-500 dark:border-red-900"><ServerCrash size={26}/></span><h1 className="hd mt-4 text-[20px]">CRM server is unavailable</h1><p className="mt-2 text-[13px] leading-relaxed text-ink-500">The CRM API cannot be reached right now. Your production data remains in PostgreSQL. Retry after the backend is available.</p><div className="mt-5 flex flex-col gap-2"><Btn onClick={retryBoot} loading={booting}><RefreshCw size={14}/>Retry connection</Btn></div></div></div>;
 }
 
 export default function App() {
-  return (
-    <StoreProvider>
-      <PrintProvider>
-        <HashRouter>
-          <ServerDownGate><Root /></ServerDownGate>
-          <CompanyDetailsEditor />
-          <ToastBridge />
-        </HashRouter>
-      </PrintProvider>
-    </StoreProvider>
-  );
+  return <StoreProvider><PrintProvider><HashRouter><ServerDownGate><Root/></ServerDownGate><CompanyDetailsEditor/><DepartmentWorkspaceLauncher/><ToastBridge/></HashRouter></PrintProvider></StoreProvider>;
 }
 
 function ToastBridge() {
   const { toasts, dropToast } = useStore();
-  return <ToastHost toasts={toasts} drop={dropToast} />;
+  return <ToastHost toasts={toasts} drop={dropToast}/>;
 }
