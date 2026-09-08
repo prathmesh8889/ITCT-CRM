@@ -98,42 +98,50 @@ export default function CalendarV2() {
 
   const selectedItems = itemsFor(selected);
   return (
-    <div className="mx-auto max-w-[1280px] p-4 md:p-6">
+    <div className="mx-auto max-w-[1280px] p-3 sm:p-4 md:p-6">
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
+        <div className="min-w-0">
           <h1 className="hd flex items-center gap-2 text-[22px]"><CalendarDays size={20} /> Monthly Calendar</h1>
           <p className="mt-1 text-[12.5px] text-ink-500">Normal month view with company events, holidays, meetings, tasks, follow-ups and payment reminders.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Btn variant="outline" size="sm" onClick={() => requestNew("holiday")}><Plus size={14} /> Add Holiday</Btn>
-          <Btn size="sm" onClick={() => requestNew("event")}><Plus size={14} /> Add Event</Btn>
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+          <Btn variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => requestNew("holiday")}><Plus size={14} /> Add Holiday</Btn>
+          <Btn size="sm" className="w-full sm:w-auto" onClick={() => requestNew("event")}><Plus size={14} /> Add Event</Btn>
         </div>
       </div>
 
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-ink-200 bg-surface p-2.5 dark:border-ink-700 dark:bg-ink-900">
-        <Btn variant="outline" size="sm" onClick={() => setCursor(new Date(year, month - 1, 1))}><ChevronLeft size={14} /> Previous</Btn>
-        <div className="hd text-[17px]">{cursor.toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</div>
-        <div className="flex gap-2"><Btn variant="ghost" size="sm" onClick={() => { const n = new Date(); setCursor(new Date(n.getFullYear(), n.getMonth(), 1)); setSelected(todayISO()); }}>Today</Btn><Btn variant="outline" size="sm" onClick={() => setCursor(new Date(year, month + 1, 1))}>Next <ChevronRight size={14} /></Btn></div>
+      <div className="mb-3 flex flex-col gap-2 rounded-lg border border-ink-200 bg-surface p-2.5 dark:border-ink-700 dark:bg-ink-900 sm:flex-row sm:items-center sm:justify-between">
+        <div className="hd w-full text-center text-[17px] sm:w-auto sm:text-left">{cursor.toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</div>
+        <div className="grid w-full grid-cols-3 gap-2 sm:w-auto sm:flex">
+          <Btn variant="outline" size="sm" className="w-full" onClick={() => setCursor(new Date(year, month - 1, 1))}><ChevronLeft size={14} /> <span className="hidden sm:inline">Previous</span><span className="sm:hidden">Prev</span></Btn>
+          <Btn variant="ghost" size="sm" className="w-full" onClick={() => { const n = new Date(); setCursor(new Date(n.getFullYear(), n.getMonth(), 1)); setSelected(todayISO()); }}>Today</Btn>
+          <Btn variant="outline" size="sm" className="w-full" onClick={() => setCursor(new Date(year, month + 1, 1))}>Next <ChevronRight size={14} /></Btn>
+        </div>
       </div>
 
       {loading && <div className="mb-2 text-[11px] text-ink-400">Loading month…</div>}
       <div className="grid gap-4 xl:grid-cols-[1fr_310px]">
         <div className="card overflow-hidden p-2 sm:p-3">
-          <div className="grid grid-cols-7 border-b border-ink-100 pb-2 text-center text-[10px] font-bold uppercase tracking-wider text-ink-400 dark:border-ink-800">{["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((x) => <div key={x}>{x}</div>)}</div>
-          <div className="mt-1 grid grid-cols-7 gap-1">
-            {gridDates.map((dt) => {
-              const key = dateKey(dt); const inMonth = dt.getMonth() === month; const today = key === todayISO(); const active = key === selected; const items = itemsFor(key);
-              return <button key={key} onClick={() => { setSelected(key); if (!inMonth) setCursor(new Date(dt.getFullYear(), dt.getMonth(), 1)); }} className={`min-h-[92px] rounded-md border p-1.5 text-left align-top transition hover:border-brand-300 sm:min-h-[108px] ${active ? "border-brand-500 bg-brand-50/60 dark:bg-brand-900/20" : "border-ink-100 dark:border-ink-800"} ${!inMonth ? "opacity-45" : ""}`}>
-                <div className="flex items-center justify-between"><span className={`num flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold ${today ? "bg-brand-600 text-white" : "text-ink-600 dark:text-ink-300"}`}>{dt.getDate()}</span>{items.length > 0 && <span className="num text-[9px] text-ink-400">{items.length}</span>}</div>
-                <div className="mt-1 space-y-1">{items.slice(0, 3).map((x, i) => <div key={`${x.kind}-${i}`} className={`truncate rounded px-1 py-0.5 text-[9px] font-medium text-white ${x.color}`}>{x.label}</div>)}{items.length > 3 && <div className="text-[9px] text-ink-400">+{items.length - 3} more</div>}</div>
-              </button>;
-            })}
+          <div className="overflow-x-auto pb-1 [scrollbar-width:thin]">
+            <div className="min-w-[720px] md:min-w-0">
+              <div className="grid grid-cols-7 border-b border-ink-100 pb-2 text-center text-[10px] font-bold uppercase tracking-wider text-ink-400 dark:border-ink-800">{["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((x) => <div key={x}>{x}</div>)}</div>
+              <div className="mt-1 grid grid-cols-7 gap-1">
+                {gridDates.map((dt) => {
+                  const key = dateKey(dt); const inMonth = dt.getMonth() === month; const today = key === todayISO(); const active = key === selected; const items = itemsFor(key);
+                  return <button key={key} onClick={() => { setSelected(key); if (!inMonth) setCursor(new Date(dt.getFullYear(), dt.getMonth(), 1)); }} className={`min-h-[92px] rounded-md border p-1.5 text-left align-top transition hover:border-brand-300 sm:min-h-[108px] ${active ? "border-brand-500 bg-brand-50/60 dark:bg-brand-900/20" : "border-ink-100 dark:border-ink-800"} ${!inMonth ? "opacity-45" : ""}`}>
+                    <div className="flex items-center justify-between"><span className={`num flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold ${today ? "bg-brand-600 text-white" : "text-ink-600 dark:text-ink-300"}`}>{dt.getDate()}</span>{items.length > 0 && <span className="num text-[9px] text-ink-400">{items.length}</span>}</div>
+                    <div className="mt-1 space-y-1">{items.slice(0, 3).map((x, i) => <div key={`${x.kind}-${i}`} className={`truncate rounded px-1 py-0.5 text-[9px] font-medium text-white ${x.color}`}>{x.label}</div>)}{items.length > 3 && <div className="text-[9px] text-ink-400">+{items.length - 3} more</div>}</div>
+                  </button>;
+                })}
+              </div>
+            </div>
           </div>
+          <p className="mt-1 text-center text-[10px] text-ink-400 md:hidden">Swipe horizontally to view the full month.</p>
         </div>
 
         <aside className="card h-fit p-4">
-          <div className="flex items-start justify-between gap-2"><div><h2 className="hd text-[15px]">{new Date(selected + "T00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</h2><p className="mt-1 text-[11px] text-ink-400">{selectedItems.length} calendar item{selectedItems.length === 1 ? "" : "s"}</p></div><Btn size="xs" variant="outline" onClick={() => requestNew("event")}><Plus size={12} /> Add</Btn></div>
-          <div className="mt-3 space-y-2">{selectedItems.length === 0 && <div className="rounded-lg border border-dashed border-ink-200 p-5 text-center text-[12px] text-ink-400 dark:border-ink-700">No entries for this day.</div>}{selectedItems.map((x, i) => <div key={`${x.kind}-${i}`} className="flex items-center gap-2 rounded-md border border-ink-100 p-2.5 dark:border-ink-800"><span className={`h-2.5 w-2.5 rounded-full ${x.color}`} /><button className="min-w-0 flex-1 text-left" onClick={() => x.record ? editEntry(x.record) : x.to && nav(x.to)}><div className="truncate text-[12.5px] font-semibold">{x.label}</div><div className="text-[10.5px] text-ink-400">{x.kind}</div></button>{x.record && <><button onClick={() => editEntry(x.record!)} className="p-1 text-ink-400 hover:text-brand-600"><Pencil size={13} /></button>{can("calendar", "delete") && <button onClick={() => void remove(x.record!)} className="p-1 text-ink-400 hover:text-red-500"><Trash2 size={13} /></button>}</>}</div>)}</div>
+          <div className="flex items-start justify-between gap-2"><div className="min-w-0"><h2 className="hd text-[15px]">{new Date(selected + "T00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</h2><p className="mt-1 text-[11px] text-ink-400">{selectedItems.length} calendar item{selectedItems.length === 1 ? "" : "s"}</p></div><Btn size="xs" variant="outline" onClick={() => requestNew("event")}><Plus size={12} /> Add</Btn></div>
+          <div className="mt-3 space-y-2">{selectedItems.length === 0 && <div className="rounded-lg border border-dashed border-ink-200 p-5 text-center text-[12px] text-ink-400 dark:border-ink-700">No entries for this day.</div>}{selectedItems.map((x, i) => <div key={`${x.kind}-${i}`} className="flex items-center gap-2 rounded-md border border-ink-100 p-2.5 dark:border-ink-800"><span className={`h-2.5 w-2.5 shrink-0 rounded-full ${x.color}`} /><button className="min-w-0 flex-1 text-left" onClick={() => x.record ? editEntry(x.record) : x.to && nav(x.to)}><div className="truncate text-[12.5px] font-semibold">{x.label}</div><div className="text-[10.5px] text-ink-400">{x.kind}</div></button>{x.record && <><button onClick={() => editEntry(x.record!)} className="p-1 text-ink-400 hover:text-brand-600"><Pencil size={13} /></button>{can("calendar", "delete") && <button onClick={() => void remove(x.record!)} className="p-1 text-ink-400 hover:text-red-500"><Trash2 size={13} /></button>}</>}</div>)}</div>
           <div className="mt-4 flex flex-wrap gap-1.5 border-t border-ink-100 pt-3 dark:border-ink-800"><Badge tone="red">Holiday</Badge><Badge tone="green">Event</Badge><Badge tone="amber">Task / reminder</Badge></div>
         </aside>
       </div>

@@ -1,4 +1,4 @@
-/* Remove retired AI/Ollama surfaces from the legacy shell/settings without disturbing other CRM settings. */
+/* Retired AI/Ollama surfaces + mobile hardening for the legacy Settings page. */
 nav > div:has(a[href="#/assistant"]) { display: none !important; }
 main > div[class*="max-w-[1100px]"] > div:nth-child(2) > button:nth-child(2) { display: none !important; }
 main > div[class*="max-w-[1100px]"] > div:first-child > p { display: none !important; }
@@ -8,4 +8,11 @@ main > div[class*="max-w-[1100px]"] > div:first-child::after {
   margin-top: 2px;
   font-size: 12.5px;
   color: rgb(100 116 139);
+}
+
+@media (max-width: 639px) {
+  main > div[class*="max-w-[1100px]"] .grid.grid-cols-2,
+  main > div[class*="max-w-[1100px]"] .grid.grid-cols-3 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
 }

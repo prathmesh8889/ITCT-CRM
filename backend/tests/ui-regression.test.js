@@ -6,10 +6,23 @@ const path = require("node:path");
 const root = path.join(__dirname, "..", "..");
 const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
 
-test("departments page exposes add and edit detail actions", () => {
+test("active departments page exposes add/edit and a visible employee viewer", () => {
+  const app = read("src/App.tsx");
   const src = read("src/pages/DepartmentsV2.tsx");
+  assert.match(app, /pages\/DepartmentsV2/);
   assert.match(src, /Add Department/);
   assert.match(src, /Edit Department Details/);
+  assert.match(src, /View Employees/);
+  assert.match(src, /departments\/\$\{row\.id\}\/employees/);
+});
+
+test("department-member endpoint is mounted and returns role/team details", () => {
+  const server = read("backend/src/server.js");
+  const route = read("backend/src/routes/department-members.js");
+  assert.match(server, /department-members/);
+  assert.match(route, /departments\/:id\/employees/);
+  assert.match(route, /role_name/);
+  assert.match(route, /team_name/);
 });
 
 test("calendar uses a normal 42-cell month grid and explicit add buttons", () => {
@@ -19,18 +32,36 @@ test("calendar uses a normal 42-cell month grid and explicit add buttons", () =>
   assert.match(src, /Add Event/);
 });
 
-test("legacy AI assistant and Ollama settings are hidden from the CRM UI", () => {
-  const css = read("src/cleanup.css");
-  assert.match(css, /assistant/);
-  assert.match(css, /nth-child\(2\)/);
+test("calendar keeps the month usable on phones", () => {
+  const src = read("src/pages/CalendarV2.tsx");
+  assert.match(src, /overflow-x-auto/);
+  assert.match(src, /min-w-\[720px\]/);
+  assert.match(src, /Swipe horizontally to view the full month/);
 });
 
-test("company owner settings endpoint is mounted", () => {
+test("legacy AI assistant and Ollama settings cleanup is actually loaded", () => {
+  const css = read("src/cleanup.css");
+  const main = read("src/main.tsx");
+  assert.match(css, /assistant/);
+  assert.match(css, /nth-child\(2\)/);
+  assert.match(main, /cleanup\.css/);
+});
+
+test("settings legacy grids are stacked on narrow screens", () => {
+  const css = read("src/cleanup.css");
+  assert.match(css, /max-width: 639px/);
+  assert.match(css, /grid-template-columns: minmax\(0, 1fr\)/);
+});
+
+test("company owner settings endpoint is mounted and editor is mobile-safe", () => {
   const server = read("backend/src/server.js");
   const owner = read("backend/src/routes/company-settings.js");
+  const editor = read("src/components/CompanyDetailsEditor.tsx");
   assert.match(server, /company-settings/);
   assert.match(owner, /Company Owner/);
   assert.match(owner, /settings\/company/);
+  assert.match(editor, /bottom-4/);
+  assert.match(editor, /sm:top-\[68px\]/);
 });
 
 test("calendar read feed is available to every authenticated user", () => {

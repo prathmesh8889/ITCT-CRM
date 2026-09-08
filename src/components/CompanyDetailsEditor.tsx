@@ -59,8 +59,13 @@ export default function CompanyDetailsEditor() {
   };
 
   return <>
-    <button onClick={() => void show()} className="fixed right-5 top-[68px] z-30 flex items-center gap-2 rounded-lg border border-brand-300 bg-surface px-3 py-2 text-[12px] font-semibold text-brand-700 shadow-md hover:bg-brand-50 dark:border-brand-800 dark:bg-ink-900 dark:text-brand-300" title="Edit real company details">
-      <Pencil size={14} /> Edit company details
+    <button
+      onClick={() => void show()}
+      disabled={busy}
+      className="fixed bottom-4 right-4 top-auto z-30 flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-lg border border-brand-300 bg-surface px-3 py-2 text-[12px] font-semibold text-brand-700 shadow-lg transition hover:bg-brand-50 disabled:opacity-60 dark:border-brand-800 dark:bg-ink-900 dark:text-brand-300 sm:bottom-auto sm:right-5 sm:top-[68px]"
+      title="Edit real company details"
+    >
+      <Pencil size={14} /> {busy ? "Loading company details…" : "Edit company details"}
     </button>
     {open && <Modal open wide onClose={() => !busy && setOpen(false)} title="Edit Company Details" footer={<><Btn variant="ghost" onClick={() => setOpen(false)}>Cancel</Btn><Btn loading={busy} onClick={() => void save()}><Building2 size={14} /> Save Company Details</Btn></>}>
       <div className="mb-3 rounded-lg border border-brand-100 bg-brand-50/60 p-3 text-[11.5px] text-brand-800 dark:border-brand-900 dark:bg-brand-950/20 dark:text-brand-200">Company Owner can maintain the real legal, contact, tax and banking details here. These values are persisted to PostgreSQL.</div>

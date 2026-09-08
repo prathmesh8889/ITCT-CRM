@@ -43,6 +43,8 @@ app.use("/api", require("./routes/dashboard"));
 // Shared calendar read access and owner-only company editing are mounted before organization/admin routes.
 app.use("/api", require("./routes/calendar-view"));
 app.use("/api", require("./routes/company-settings"));
+// Dedicated department-member endpoint avoids loading/filtering the entire user directory in the browser.
+app.use("/api", require("./routes/department-members"));
 app.use("/api", require("./routes/organization"));
 app.use("/api", require("./routes/user-create"));
 app.use("/api", require("./routes/user-security"));
