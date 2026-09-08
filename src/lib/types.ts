@@ -4,7 +4,7 @@ export type ID = string;
 export type ModuleKey =
   | "dashboard" | "leads" | "discovery" | "customers" | "companies" | "contacts"
   | "deals" | "followups" | "tasks" | "meetings" | "calendar" | "quotations"
-  | "invoices" | "payments" | "expenses" | "products" | "employees" | "reports"
+  | "invoices" | "payments" | "expenses" | "products" | "employees" | "teams" | "reports"
   | "automation" | "ai" | "settings" | "audit";
 
 export type Perm = "view" | "create" | "edit" | "delete" | "assign" | "export" | "approve";
@@ -80,101 +80,53 @@ export interface CallLog {
   direction: "Outgoing" | "Incoming"; outcome: CallOutcome; notes: string; durationMin: number; createdAt: string;
 }
 
-export interface Meeting {
-  id: ID; title: string; entityType: "lead" | "customer"; entityId: ID; employeeIds: ID[];
-  date: string; start: string; end: string; location: string; link: string;
-  agenda: string; notes: string; outcome: string; createdAt: string;
-}
-
 export interface Task {
   id: ID; title: string; description: string; entityType?: "lead" | "customer"; entityId?: ID;
   assigneeId: ID; priority: Priority; status: "Pending" | "In Progress" | "Completed" | "Cancelled";
   dueDate: string; createdBy: ID; createdAt: string;
 }
-
-export interface Note { id: ID; entityType: string; entityId: ID; body: string; authorId: ID; createdAt: string; }
-
-export interface Product {
-  id: ID; name: string; sku: string; category: string; description: string;
-  unit: string; price: number; gstPct: number; active: boolean;
+export interface Meeting {
+  id: ID; title: string; entityType: "lead" | "customer"; entityId: ID; employeeIds: ID[];
+  date: string; start: string; end: string; location: string; link: string; agenda: string;
+  notes: string; outcome: string; createdAt: string;
 }
-
-export interface DocItem { id: ID; name: string; productId?: ID; qty: number; rate: number; discountPct: number; gstPct: number; }
-export type QuoteStatus = "Draft" | "Sent" | "Accepted" | "Rejected" | "Expired";
+export interface Product { id: ID; name: string; sku: string; category: string; description: string; unit: string; price: number; gstPct: number; active: boolean; }
+export interface QuoteItem { productId?: ID; description: string; qty: number; unitPrice: number; discountPct: number; gstPct: number; }
 export interface Quotation {
-  id: ID; number: string; customerId: ID; date: string; validUntil: string;
-  items: DocItem[]; discountPct: number; status: QuoteStatus; terms: string; notes: string;
+  id: ID; number: string; customerId?: ID; companyId?: ID; date: string; validUntil: string;
+  items: QuoteItem[]; subtotal: number; discountTotal: number; taxTotal: number; grandTotal: number;
+  terms: string; notes: string; status: "Draft" | "Sent" | "Accepted" | "Rejected" | "Expired";
   createdBy: ID; createdAt: string;
 }
-export type InvoiceStatus = "Draft" | "Sent" | "Partially Paid" | "Paid" | "Overdue" | "Cancelled";
 export interface Invoice {
-  id: ID; number: string; customerId: ID; date: string; dueDate: string;
-  items: DocItem[]; discountPct: number; status: InvoiceStatus; notes: string;
+  id: ID; number: string; customerId: ID; invoiceDate: string; dueDate: string; items: QuoteItem[];
+  subtotal: number; discountTotal: number; taxTotal: number; grandTotal: number; paidAmount: number;
+  balanceDue: number; notes: string; status: "Draft" | "Sent" | "Partially Paid" | "Paid" | "Overdue" | "Cancelled";
   quotationId?: ID; createdBy: ID; createdAt: string;
 }
-
-export type PayMode = "Cash" | "UPI" | "Bank Transfer" | "Card" | "Cheque" | "Other";
-export interface Payment {
-  id: ID; invoiceId: ID; customerId: ID; amount: number; date: string; mode: PayMode;
-  txnId: string; notes: string; recordedBy: ID; createdAt: string;
-}
+export interface Payment { id: ID; number: string; invoiceId: ID; customerId: ID; amount: number; date: string; method: string; reference: string; notes: string; recordedBy: ID; createdAt: string; }
 export interface Expense { id: ID; category: string; vendor: string; amount: number; date: string; notes: string; recordedBy: ID; createdAt: string; }
 
-export interface Activity { id: ID; entityType: string; entityId: ID; userId: ID; action: string; detail: string; at: string; }
-export interface Notice {
-  id: ID; userId: ID | "managers"; title: string; body: string; read: boolean; at: string;
-  link: string; kind: "lead" | "followup" | "meeting" | "task" | "invoice" | "quote" | "system" | "ai";
-}
+export type TriggerKey = "lead.created" | "lead.assigned" | "lead.scored" | "lead.status" | "quote.sent" | "invoice.overdue" | "followup.missed";
+export type RuleAction = { type: string; value?: string };
+export interface AutomationRule { id: ID; name: string; trigger: TriggerKey; condField: string; condOp: string; condValue: string; actions: RuleAction[]; enabled: boolean; }
 export interface AuditLog { id: ID; userId: ID; userName: string; action: string; target: string; detail: string; at: string; }
-
-export type TriggerKey =
-  | "lead.created" | "lead.assigned" | "lead.scored" | "lead.status"
-  | "quote.sent" | "invoice.overdue" | "followup.missed";
-export type RuleActionType =
-  | "assign_team" | "assign_user" | "assign_strategy" | "followup" | "notify"
-  | "set_priority" | "set_status";
-export interface RuleAction { type: RuleActionType; value: string; hours?: number; fuType?: FUType; }
-export interface AutomationRule {
-  id: ID; name: string; trigger: TriggerKey; condField: string;
-  condOp: "eq" | "neq" | "gte" | "lte" | "contains"; condValue: string;
-  actions: RuleAction[]; enabled: boolean;
-}
-export interface AutomationRun { id: ID; ruleId: ID; ruleName: string; summary: string; at: string; }
-
-export interface Template { id: ID; channel: "whatsapp" | "email"; name: string; subject: string; body: string; }
-
-export interface AILog { id: ID; kind: string; model: string; prompt: string; output: string; ms: number; at: string; }
-
-export interface CompanySettings {
-  name: string; tagline: string; email: string; phone: string; website: string;
-  address: string; gstin: string; pan: string; currency: string; timezone: string; logoMark: string;
-}
-export interface AISettings { url: string; model: string; temperature: number; timeoutSec: number; }
-export interface ScoringRules {
-  phone: number; email: number; website: number; location: number; industry: number;
-  rating: number; engagement: number; targetLocations: string[]; targetIndustries: string[];
-}
-export type Strategy = "manual" | "round_robin" | "least_leads" | "least_workload" | "location" | "category" | "priority" | "team";
-export interface AssignmentSettings {
-  strategy: Strategy; rrPointer: number; highValueThreshold: number; highValueUserId: ID | "";
-  categoryMap: Record<string, ID>; locationMap: Record<string, ID>;
-}
+export interface Notice { id: ID; userId: ID; title: string; body: string; read: boolean; at: string; link: string; }
+export interface MessageTemplate { id: ID; channel: string; name: string; subject: string; body: string; }
 
 export interface Settings {
-  company: CompanySettings; ai: AISettings; scoring: ScoringRules; assignment: AssignmentSettings;
+  company: { name: string; tagline: string; email: string; phone: string; website: string; address: string; gstin: string; pan: string; currency: string; timezone: string; logoMark: string; };
+  ai: { url: string; model: string; temperature: number; timeoutSec: number; };
+  scoring: { phone: number; email: number; website: number; location: number; industry: number; rating: number; engagement: number; targetLocations: string[]; targetIndustries: string[]; };
+  assignment: { strategy: string; rrPointer: number; highValueThreshold: number; highValueUserId: ID; categoryMap: Record<string, string>; locationMap: Record<string, string>; };
 }
 
 export interface DB {
-  v: number;
   users: User[]; roles: Role[]; teams: Team[];
-  leads: Lead[]; leadSources: string[]; leadStatuses: string[];
-  discoveryJobs: DiscoveryJob[];
-  customers: Customer[]; companies: Company[]; contacts: Contact[];
-  deals: Deal[]; dealStages: DealStage[];
-  followups: FollowUp[]; calls: CallLog[]; meetings: Meeting[]; tasks: Task[]; notes: Note[];
-  products: Product[]; quotations: Quotation[]; invoices: Invoice[]; payments: Payment[]; expenses: Expense[];
-  activities: Activity[]; notices: Notice[]; auditLogs: AuditLog[];
-  rules: AutomationRule[]; ruleRuns: AutomationRun[];
-  templates: Template[]; aiLogs: AILog[];
-  settings: Settings;
+  leads: Lead[]; jobs: DiscoveryJob[]; customers: Customer[]; companies: Company[]; contacts: Contact[];
+  dealStages: DealStage[]; deals: Deal[]; followups: FollowUp[]; tasks: Task[]; meetings: Meeting[];
+  calls: CallLog[]; products: Product[]; quotations: Quotation[]; invoices: Invoice[]; payments: Payment[];
+  expenses: Expense[]; rules: AutomationRule[]; ruleRuns: { id: ID; ruleId: ID; ruleName: string; summary: string; at: string }[];
+  auditLogs: AuditLog[]; notices: Notice[]; templates: MessageTemplate[]; settings: Settings;
+  leadStatuses: string[]; leadSources: string[];
 }
