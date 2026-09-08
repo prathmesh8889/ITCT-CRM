@@ -7,6 +7,7 @@ const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const { config, HttpError, sha256 } = require("./core");
 const { db } = require("./db");
+const { ensureAccessLevelSchema, effectiveAccessLevel, isValidAccessLevel } = require("./access-levels");
 
 const hashPassword = (plain) => bcrypt.hashSync(plain, 10);
 const verifyPassword = (plain, hash) => { try { return bcrypt.compareSync(plain, hash); } catch { return false; } };
@@ -64,10 +65,17 @@ async function requireAuth(req, _res, next) {
     let payload;
     try { payload = jwt.verify(token, config.jwtSecret); } catch { throw new HttpError(401, "Invalid or expired token"); }
     if (payload.type !== "access") throw new HttpError(401, "Invalid token type");
+
+    // Access-level schema is idempotent and cached. Running it here also keeps
+    // auth safe in environments where the Express app is imported without the
+    // normal server boot sequence.
+    await ensureAccessLevelSchema();
     const user = await db.one("SELECT * FROM users WHERE id = $1", [Number(payload.sub)]);
     if (!user || !user.active || user.deleted_at) throw new HttpError(401, "Account is disabled");
     const role = await db.one("SELECT * FROM roles WHERE id = $1", [user.role_id]);
     if (!role) throw new HttpError(403, "Role missing");
+    const accessLevel = effectiveAccessLevel(user, role.name);
+    if (!isValidAccessLevel(accessLevel)) throw new HttpError(403, "Access level is not configured");
     const department = await enforceDepartmentRole(user, role);
 
     // A temporary/reset password can authenticate only to auth endpoints needed
@@ -79,6 +87,7 @@ async function requireAuth(req, _res, next) {
 
     req.user = user;
     req.role = role;
+    req.accessLevel = accessLevel;
     req.department = department;
     next();
   } catch (e) { next(e); }

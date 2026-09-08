@@ -9,6 +9,7 @@ const { config, HttpError } = require("./core");
 const { sweepOverdueInvoices } = require("./engines");
 const { cleanupDemoData } = require("./cleanup-demo");
 const { ensureAuthSchema } = require("./auth-schema");
+const { ensureAccessLevelSchema } = require("./access-levels");
 const { ensureOrganizationSchema } = require("./organization-schema");
 const { router: crmRoutes, startDiscoveryWorker } = require("./routes/crm");
 
@@ -40,6 +41,8 @@ app.use("/api/auth", require("./routes/auth"));
 app.use("/api", crmRoutes);
 app.use("/api", require("./routes/billing"));
 app.use("/api", require("./routes/dashboard"));
+// Organizational access-level foundation is mounted before employee/admin routes.
+app.use("/api", require("./routes/access-levels"));
 // Shared calendar read access and owner-only company editing are mounted before organization/admin routes.
 app.use("/api", require("./routes/calendar-view"));
 app.use("/api", require("./routes/company-settings"));
@@ -64,6 +67,7 @@ async function main() {
     try {
       await initSchema();
       await ensureAuthSchema();
+      await ensureAccessLevelSchema();
       await ensureOrganizationSchema();
       console.log("[boot] schema ready (CREATE/ALTER IF NOT EXISTS)");
     } catch (e) {
@@ -72,6 +76,7 @@ async function main() {
     }
   } else {
     await ensureAuthSchema();
+    await ensureAccessLevelSchema();
     await ensureOrganizationSchema();
   }
   try {

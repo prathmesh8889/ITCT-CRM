@@ -23,6 +23,7 @@ import Products from "./pages/Products";
 import Reports from "./pages/Reports";
 import EmployeeManagement from "./pages/EmployeeManagement";
 import Departments from "./pages/DepartmentsV2";
+import AccessLevels from "./pages/AccessLevels";
 import { EmployeesPage, AutomationPage, AuditPage } from "./pages/Admin";
 import Settings from "./pages/Settings";
 import type { ModuleKey } from "./lib/types";
@@ -79,6 +80,7 @@ function Root() {
         <Route path="/reports" element={<Guard mod="reports"><Reports /></Guard>} />
         <Route path="/assistant" element={<Navigate to="/dashboard" replace />} />
         <Route path="/employees" element={<Guard mod="employees"><EmployeeManagement /></Guard>} />
+        <Route path="/access-levels" element={<Guard mod="employees"><AccessLevels /></Guard>} />
         <Route path="/departments" element={<Guard mod="employees"><Departments /></Guard>} />
         <Route path="/access-settings" element={<Guard mod="employees"><EmployeesPage /></Guard>} />
         <Route path="/automation" element={<Guard mod="automation"><AutomationPage /></Guard>} />
