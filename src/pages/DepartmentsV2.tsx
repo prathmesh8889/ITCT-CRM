@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Building2, ChevronRight, Mail, Pencil, Phone, Plus, Search, Trash2, Users } from "lucide-react";
+import { Building2, ChevronRight, Mail, Pencil, Phone, Plus, Search, Trash2, UserMinus, UserPlus, Users } from "lucide-react";
 import { api, DEMO_MODE } from "../lib/api";
 import { useDB } from "../lib/db";
 import { useStore } from "../store";
@@ -43,9 +43,16 @@ export default function DepartmentsV2() {
   const [editing, setEditing] = useState<Department | null>(null);
   const [form, setForm] = useState<FormState>(blank());
   const [busy, setBusy] = useState(false);
+
   const [memberDepartment, setMemberDepartment] = useState<Department | null>(null);
   const [members, setMembers] = useState<DepartmentMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
+  const [memberBusyId, setMemberBusyId] = useState<string | null>(null);
+
+  const [candidateOpen, setCandidateOpen] = useState(false);
+  const [candidates, setCandidates] = useState<DepartmentMember[]>([]);
+  const [candidateLoading, setCandidateLoading] = useState(false);
+  const [candidateQuery, setCandidateQuery] = useState("");
 
   const load = async () => {
     if (DEMO_MODE) {
@@ -72,6 +79,14 @@ export default function DepartmentsV2() {
     return q ? rows.filter((x) => `${x.name} ${x.description}`.toLowerCase().includes(q)) : rows;
   }, [rows, query]);
 
+  const candidateFiltered = useMemo(() => {
+    const q = candidateQuery.trim().toLowerCase();
+    if (!q) return candidates;
+    return candidates.filter((x) => `${x.name} ${x.email} ${x.phone} ${x.department} ${x.role_name || ""} ${x.team_name || ""}`.toLowerCase().includes(q));
+  }, [candidates, candidateQuery]);
+
+  const roleName = (id: number | string, fallback?: string) => fallback || d.roles.find((r) => Number(r.id) === Number(id))?.name || `Role #${id}`;
+
   const openAdd = () => {
     if (!can("employees", "create")) { toast("You do not have permission to add departments", "warn"); return; }
     setEditing(null); setForm(blank()); setModal(true);
@@ -84,9 +99,7 @@ export default function DepartmentsV2() {
     setModal(true);
   };
 
-  const openMembers = async (row: Department) => {
-    setMemberDepartment(row);
-    setMembers([]);
+  const fetchMembers = async (row: Department) => {
     setMembersLoading(true);
     try {
       if (DEMO_MODE) {
@@ -116,6 +129,94 @@ export default function DepartmentsV2() {
     } finally { setMembersLoading(false); }
   };
 
+  const openMembers = async (row: Department) => {
+    setMemberDepartment(row);
+    setMembers([]);
+    setCandidateOpen(false);
+    await fetchMembers(row);
+  };
+
+  const openCandidatePicker = async () => {
+    if (!memberDepartment) return;
+    if (!can("employees", "edit")) { toast("You do not have permission to change department members", "warn"); return; }
+    if (!memberDepartment.active) { toast("Enable this department before adding employees", "warn"); return; }
+    setCandidateOpen(true);
+    setCandidateQuery("");
+    setCandidates([]);
+    setCandidateLoading(true);
+    try {
+      if (DEMO_MODE) {
+        const rows = d.users
+          .filter((u) => memberDepartment.name === "Sales" ? !u.isSales : u.isSales)
+          .map((u) => ({
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            phone: u.phone,
+            department: memberDepartment.name === "Sales" ? "Operations" : "Sales",
+            designation: "",
+            role_id: u.roleId,
+            role_name: d.roles.find((r) => r.id === u.roleId)?.name || "",
+            team_name: d.teams.find((t) => t.id === u.teamId)?.name || "",
+            active: u.active,
+            color: u.color,
+          }));
+        setCandidates(rows);
+        return;
+      }
+      const r = await api.get<DepartmentMember[]>(`/departments/${memberDepartment.id}/candidates`);
+      setCandidates(r.data || []);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not load available employees", "err");
+    } finally { setCandidateLoading(false); }
+  };
+
+  const roleAllowed = (employee: DepartmentMember) => {
+    if (!memberDepartment) return false;
+    const allowed = (memberDepartment.allowed_role_ids || []).map(Number);
+    if (allowed.length === 0) return true;
+    const name = roleName(employee.role_id, employee.role_name);
+    return allowed.includes(Number(employee.role_id)) || ["Super Admin", "Admin"].includes(name);
+  };
+
+  const assignCandidate = async (employee: DepartmentMember) => {
+    if (!memberDepartment) return;
+    if (!roleAllowed(employee)) {
+      toast(`${roleName(employee.role_id, employee.role_name)} is not allowed in ${memberDepartment.name}`, "warn");
+      return;
+    }
+    if (employee.department?.trim()) {
+      const ok = window.confirm(`Move ${employee.name} from ${employee.department} to ${memberDepartment.name}?`);
+      if (!ok) return;
+    }
+    if (DEMO_MODE) { toast("Department membership changes require the backend workspace", "warn"); return; }
+    setMemberBusyId(String(employee.id));
+    try {
+      await api.post(`/departments/${memberDepartment.id}/employees`, { user_id: Number(employee.id) });
+      toast(employee.department?.trim() ? "Employee moved" : "Employee added", "ok", `${employee.name} → ${memberDepartment.name}`);
+      setCandidates((xs) => xs.filter((x) => String(x.id) !== String(employee.id)));
+      await Promise.all([fetchMembers(memberDepartment), load()]);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not add employee to department", "err");
+    } finally { setMemberBusyId(null); }
+  };
+
+  const removeMember = async (employee: DepartmentMember) => {
+    if (!memberDepartment) return;
+    if (!can("employees", "edit")) { toast("You do not have permission to change department members", "warn"); return; }
+    const ok = window.confirm(`Remove ${employee.name} from ${memberDepartment.name}? Their CRM account will remain active.`);
+    if (!ok) return;
+    if (DEMO_MODE) { toast("Department membership changes require the backend workspace", "warn"); return; }
+    setMemberBusyId(String(employee.id));
+    try {
+      await api.delete(`/departments/${memberDepartment.id}/employees/${employee.id}`);
+      toast("Removed from department", "ok", `${employee.name} is still an employee and can still sign in.`);
+      await Promise.all([fetchMembers(memberDepartment), load()]);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not remove employee from department", "err");
+    } finally { setMemberBusyId(null); }
+  };
+
   const toggleRole = (id: number) => setForm((p) => ({
     ...p,
     allowedRoleIds: p.allowedRoleIds.includes(id) ? p.allowedRoleIds.filter((x) => x !== id) : [...p.allowedRoleIds, id],
@@ -142,14 +243,12 @@ export default function DepartmentsV2() {
     } catch (e) { toast(e instanceof Error ? e.message : "Could not delete department", "err"); }
   };
 
-  const roleName = (id: number | string, fallback?: string) => fallback || d.roles.find((r) => Number(r.id) === Number(id))?.name || `Role #${id}`;
-
   return (
     <div className="mx-auto max-w-[1200px] p-3 sm:p-4 md:p-6">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <h1 className="hd flex items-center gap-2 text-[22px]"><Building2 size={20} /> Departments</h1>
-          <p className="mt-1 text-[12.5px] text-ink-500">Add departments, edit department details, view members, and control department-wise role access.</p>
+          <p className="mt-1 text-[12.5px] text-ink-500">Add departments, edit details, manage members, and control department-wise role access.</p>
         </div>
         <Btn size="sm" className="w-full sm:w-auto" onClick={openAdd}><Plus size={14} /> Add Department</Btn>
       </div>
@@ -215,13 +314,20 @@ export default function DepartmentsV2() {
       )}
 
       {memberDepartment && (
-        <Modal open wide onClose={() => setMemberDepartment(null)} title={`${memberDepartment.name} · Employees`}>
-          <div className="mb-3 flex flex-col gap-2 rounded-lg border border-ink-100 bg-ink-50/70 px-3 py-2.5 dark:border-ink-800 dark:bg-ink-800/40 sm:flex-row sm:items-center sm:justify-between">
+        <Modal open wide onClose={() => { setMemberDepartment(null); setCandidateOpen(false); }} title={`${memberDepartment.name} · Employees`}>
+          <div className="mb-3 flex flex-col gap-3 rounded-lg border border-ink-100 bg-ink-50/70 px-3 py-2.5 dark:border-ink-800 dark:bg-ink-800/40 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="text-[12.5px] font-semibold text-ink-800 dark:text-ink-100">Department members</div>
               <div className="text-[11px] text-ink-400">Employees currently assigned to {memberDepartment.name}</div>
             </div>
-            <Badge tone="green" className="self-start sm:self-auto">{membersLoading ? "Loading…" : `${members.length} employee${members.length === 1 ? "" : "s"}`}</Badge>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone="green">{membersLoading ? "Loading…" : `${members.length} employee${members.length === 1 ? "" : "s"}`}</Badge>
+              {can("employees", "edit") && (
+                <Btn size="xs" onClick={() => void openCandidatePicker()} disabled={!memberDepartment.active}>
+                  <UserPlus size={13} /> Add / Move Employee
+                </Btn>
+              )}
+            </div>
           </div>
 
           {membersLoading ? (
@@ -231,30 +337,100 @@ export default function DepartmentsV2() {
               <Users size={24} className="mx-auto mb-2 text-ink-300" />
               <div className="text-[13px] font-semibold text-ink-600 dark:text-ink-300">No employees found</div>
               <div className="mt-1 text-[11.5px] text-ink-400">No employee record is currently assigned to this department.</div>
+              {can("employees", "edit") && memberDepartment.active && <Btn size="sm" className="mt-4" onClick={() => void openCandidatePicker()}><UserPlus size={14} /> Add Employee</Btn>}
             </div>
           ) : (
             <div className="max-h-[460px] space-y-2 overflow-y-auto pr-1">
               {members.map((m) => (
                 <div key={String(m.id)} className="rounded-lg border border-ink-100 p-3 dark:border-ink-800">
-                  <div className="flex items-start gap-3">
-                    <Avatar name={m.name} color={m.color || "#0F766E"} size={36} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="truncate text-[13.5px] font-bold text-ink-800 dark:text-ink-100">{m.name}</div>
-                        <Badge tone={m.active ? "green" : "red"}>{m.active ? "Active" : "Inactive"}</Badge>
-                      </div>
-                      <div className="mt-0.5 text-[11.5px] text-ink-500">
-                        {m.designation || "No designation"} · <span className="font-semibold">{roleName(m.role_id, m.role_name)}</span>
-                        {m.team_name ? <> · {m.team_name}</> : null}
-                      </div>
-                      <div className="mt-2 grid gap-1 text-[11px] text-ink-400 sm:grid-cols-2">
-                        {m.email && <span className="flex min-w-0 items-start gap-1"><Mail size={11} className="mt-0.5 shrink-0" /><span className="break-all">{m.email}</span></span>}
-                        {m.phone && <span className="flex items-center gap-1"><Phone size={11} /> {m.phone}</span>}
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                      <Avatar name={m.name} color={m.color || "#0F766E"} size={36} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="truncate text-[13.5px] font-bold text-ink-800 dark:text-ink-100">{m.name}</div>
+                          <Badge tone={m.active ? "green" : "red"}>{m.active ? "Active" : "Inactive"}</Badge>
+                        </div>
+                        <div className="mt-0.5 text-[11.5px] text-ink-500">
+                          {m.designation || "No designation"} · <span className="font-semibold">{roleName(m.role_id, m.role_name)}</span>
+                          {m.team_name ? <> · {m.team_name}</> : null}
+                        </div>
+                        <div className="mt-2 grid gap-1 text-[11px] text-ink-400 sm:grid-cols-2">
+                          {m.email && <span className="flex min-w-0 items-start gap-1"><Mail size={11} className="mt-0.5 shrink-0" /><span className="break-all">{m.email}</span></span>}
+                          {m.phone && <span className="flex items-center gap-1"><Phone size={11} /> {m.phone}</span>}
+                        </div>
                       </div>
                     </div>
+                    {can("employees", "edit") && (
+                      <Btn
+                        size="xs"
+                        variant="outline"
+                        className="w-full shrink-0 sm:w-auto"
+                        loading={memberBusyId === String(m.id)}
+                        onClick={() => void removeMember(m)}
+                      >
+                        <UserMinus size={12} /> Remove from Department
+                      </Btn>
+                    )}
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {candidateOpen && memberDepartment && (
+        <Modal open wide onClose={() => !memberBusyId && setCandidateOpen(false)} title={`Add / Move Employee · ${memberDepartment.name}`}>
+          <div className="mb-3 rounded-lg border border-brand-100 bg-brand-50/60 p-3 text-[11.5px] text-brand-800 dark:border-brand-900 dark:bg-brand-950/20 dark:text-brand-200">
+            Select an existing employee. If they are already in another department, they will be moved here. Their account, role, team and login stay unchanged.
+          </div>
+          <div className="relative mb-3">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
+            <Input className="pl-9" value={candidateQuery} onChange={(e) => setCandidateQuery(e.target.value)} placeholder="Search employee, email, role or current department..." />
+          </div>
+
+          {candidateLoading ? (
+            <div className="py-10 text-center text-[13px] text-ink-400">Loading available employees…</div>
+          ) : candidateFiltered.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-ink-200 p-8 text-center text-[12.5px] text-ink-400 dark:border-ink-700">No other employees available to add.</div>
+          ) : (
+            <div className="max-h-[430px] space-y-2 overflow-y-auto pr-1">
+              {candidateFiltered.map((m) => {
+                const allowed = roleAllowed(m);
+                return (
+                  <div key={String(m.id)} className="rounded-lg border border-ink-100 p-3 dark:border-ink-800">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                      <div className="flex min-w-0 flex-1 items-start gap-3">
+                        <Avatar name={m.name} color={m.color || "#0F766E"} size={34} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="truncate text-[13px] font-bold">{m.name}</div>
+                            <Badge tone={m.active ? "green" : "red"}>{m.active ? "Active" : "Inactive"}</Badge>
+                            {!allowed && <Badge tone="amber">Role not allowed</Badge>}
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-ink-500">
+                            {roleName(m.role_id, m.role_name)}{m.team_name ? ` · ${m.team_name}` : ""}
+                          </div>
+                          <div className="mt-1 text-[10.5px] text-ink-400">
+                            {m.department?.trim() ? <>Current department: <strong>{m.department}</strong></> : "Currently unassigned"}
+                          </div>
+                          {m.email && <div className="mt-1 truncate text-[10.5px] text-ink-400">{m.email}</div>}
+                        </div>
+                      </div>
+                      <Btn
+                        size="xs"
+                        className="w-full shrink-0 sm:w-auto"
+                        disabled={!allowed}
+                        loading={memberBusyId === String(m.id)}
+                        onClick={() => void assignCandidate(m)}
+                      >
+                        <UserPlus size={12} /> {m.department?.trim() ? `Move to ${memberDepartment.name}` : `Add to ${memberDepartment.name}`}
+                      </Btn>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </Modal>
