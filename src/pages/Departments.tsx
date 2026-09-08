@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Building2, Pencil, Plus, Search, Trash2, Users } from "lucide-react";
+import { Building2, ChevronRight, Mail, Pencil, Phone, Plus, Search, Trash2, Users } from "lucide-react";
 import { api, DEMO_MODE } from "../lib/api";
 import { useDB } from "../lib/db";
 import { useStore } from "../store";
-import { Badge, Btn, Field, Input, Modal, Textarea, Toggle } from "../components/ui";
+import { Avatar, Badge, Btn, Field, Input, Modal, Textarea, Toggle } from "../components/ui";
 
 type Department = {
   id: number;
@@ -12,6 +12,18 @@ type Department = {
   allowed_role_ids: number[];
   active: boolean;
   member_count: number;
+};
+
+type DepartmentMember = {
+  id: number | string;
+  name: string;
+  email: string;
+  phone: string;
+  department: string;
+  designation: string;
+  role_id: number | string;
+  active: boolean;
+  color: string;
 };
 
 type FormState = {
@@ -33,6 +45,9 @@ export default function Departments() {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm());
   const [busy, setBusy] = useState(false);
+  const [memberDepartment, setMemberDepartment] = useState<Department | null>(null);
+  const [members, setMembers] = useState<DepartmentMember[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
 
   const load = async () => {
     if (DEMO_MODE) {
@@ -79,6 +94,36 @@ export default function Departments() {
     setCreating(true);
   };
 
+  const openMembers = async (row: Department) => {
+    setMemberDepartment(row);
+    setMembers([]);
+    setMembersLoading(true);
+    try {
+      if (DEMO_MODE) {
+        const demoUsers = d.users.filter((u) => row.name === "Sales" ? u.isSales : !u.isSales).map((u) => ({
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          phone: u.phone,
+          department: row.name,
+          designation: "",
+          role_id: u.roleId,
+          active: u.active,
+          color: u.color,
+        }));
+        setMembers(demoUsers);
+        return;
+      }
+      const r = await api.get<DepartmentMember[]>("/users");
+      const departmentName = row.name.trim().toLowerCase();
+      setMembers((r.data || []).filter((u) => String(u.department || "").trim().toLowerCase() === departmentName));
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not load department employees", "err");
+    } finally {
+      setMembersLoading(false);
+    }
+  };
+
   const toggleRole = (roleId: number) => {
     setForm((p) => ({
       ...p,
@@ -120,7 +165,7 @@ export default function Departments() {
     } catch (e) { toast(e instanceof Error ? e.message : "Could not delete department", "err"); }
   };
 
-  const roleName = (id: number) => d.roles.find((r) => Number(r.id) === id)?.name || `Role #${id}`;
+  const roleName = (id: number | string) => d.roles.find((r) => Number(r.id) === Number(id))?.name || `Role #${id}`;
 
   return (
     <div className="mx-auto max-w-[1200px] p-4 md:p-6">
@@ -154,11 +199,17 @@ export default function Departments() {
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300"><Building2 size={17} /></span>
               </div>
 
-              <div className="mt-4 flex items-center gap-2 rounded-lg border border-ink-100 bg-ink-50/70 p-2.5 dark:border-ink-800 dark:bg-ink-800/40">
+              <button
+                type="button"
+                onClick={() => void openMembers(row)}
+                className="mt-4 flex w-full items-center gap-2 rounded-lg border border-ink-100 bg-ink-50/70 p-2.5 text-left transition hover:border-brand-300 hover:bg-brand-50/60 dark:border-ink-800 dark:bg-ink-800/40 dark:hover:border-brand-700 dark:hover:bg-brand-900/20"
+                title={`View ${row.name} employees`}
+              >
                 <Users size={15} className="text-ink-400" />
                 <span className="num text-[13px] font-bold text-ink-700 dark:text-ink-200">{row.member_count || 0}</span>
                 <span className="text-[11.5px] text-ink-400">employee{row.member_count === 1 ? "" : "s"}</span>
-              </div>
+                <span className="ml-auto flex items-center gap-1 text-[10.5px] font-semibold text-brand-600 dark:text-brand-300">View employees <ChevronRight size={13} /></span>
+              </button>
 
               <div className="mt-4">
                 <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.12em] text-ink-400">Allowed roles</div>
@@ -170,13 +221,58 @@ export default function Departments() {
               </div>
 
               <div className="mt-4 flex justify-end gap-1 border-t border-ink-100 pt-3 dark:border-ink-800">
-                {can("employees", "edit") && <Btn size="xs" variant="outline" onClick={() => openEdit(row)}><Pencil size={12} /> Edit</Btn>}
+                {can("employees", "edit") && <Btn size="xs" variant="outline" onClick={() => openEdit(row)}><Pencil size={12} /> Edit Department Details</Btn>}
                 {can("employees", "delete") && <Btn size="xs" variant="ghost" onClick={() => void remove(row)}><Trash2 size={12} /> Delete</Btn>}
               </div>
             </div>
           ))}
           {filtered.length === 0 && <div className="card col-span-full p-8 text-center text-[13px] text-ink-500">No departments found.</div>}
         </div>
+      )}
+
+      {memberDepartment && (
+        <Modal open onClose={() => setMemberDepartment(null)} title={`${memberDepartment.name} · Employees`} wide>
+          <div className="mb-3 flex items-center justify-between rounded-lg border border-ink-100 bg-ink-50/70 px-3 py-2.5 dark:border-ink-800 dark:bg-ink-800/40">
+            <div>
+              <div className="text-[12.5px] font-semibold text-ink-800 dark:text-ink-100">Department members</div>
+              <div className="text-[11px] text-ink-400">Employees currently assigned to {memberDepartment.name}</div>
+            </div>
+            <Badge tone="green">{membersLoading ? "Loading…" : `${members.length} employee${members.length === 1 ? "" : "s"}`}</Badge>
+          </div>
+
+          {membersLoading ? (
+            <div className="py-10 text-center text-[13px] text-ink-400">Loading employees…</div>
+          ) : members.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-ink-200 p-8 text-center dark:border-ink-700">
+              <Users size={24} className="mx-auto mb-2 text-ink-300" />
+              <div className="text-[13px] font-semibold text-ink-600 dark:text-ink-300">No employees found</div>
+              <div className="mt-1 text-[11.5px] text-ink-400">No active employee record is currently assigned to this department.</div>
+            </div>
+          ) : (
+            <div className="max-h-[440px] space-y-2 overflow-y-auto pr-1">
+              {members.map((m) => (
+                <div key={String(m.id)} className="rounded-lg border border-ink-100 p-3 dark:border-ink-800">
+                  <div className="flex items-start gap-3">
+                    <Avatar name={m.name} color={m.color || "#0F766E"} size={36} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="truncate text-[13.5px] font-bold text-ink-800 dark:text-ink-100">{m.name}</div>
+                        <Badge tone={m.active ? "green" : "red"}>{m.active ? "Active" : "Inactive"}</Badge>
+                      </div>
+                      <div className="mt-0.5 text-[11.5px] text-ink-500">
+                        {m.designation || "No designation"} · <span className="font-semibold">{roleName(m.role_id)}</span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-400">
+                        {m.email && <span className="flex items-center gap-1"><Mail size={11} /> {m.email}</span>}
+                        {m.phone && <span className="flex items-center gap-1"><Phone size={11} /> {m.phone}</span>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Modal>
       )}
 
       {creating && (
