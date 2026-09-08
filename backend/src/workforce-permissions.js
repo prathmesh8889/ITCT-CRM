@@ -19,12 +19,14 @@ function addCommon(perms, level) {
     add(perms, "tasks", ["view", "create", "edit", "delete", "assign"]);
     add(perms, "meetings", ["view", "create", "edit", "delete"]);
     add(perms, "calendar", ["view", "create", "edit", "delete"]);
-    add(perms, "employees", ["view", "edit"]); // backend: own department only
+    add(perms, "employees", ["view", "create", "edit"]); // own department only
+    add(perms, "teams", ["view", "create", "edit"]); // own department only
   } else if (level === 4) {
     add(perms, "tasks", ["view", "create", "edit", "assign"]);
     add(perms, "meetings", ["view", "create", "edit"]);
     add(perms, "calendar", ["view", "create", "edit"]);
-    add(perms, "employees", ["view"]); // backend: own team only
+    add(perms, "employees", ["view"]); // own team only
+    add(perms, "teams", ["view"]); // own team only
   } else if (level === 5) {
     add(perms, "tasks", ["view", "create", "edit"]);
     add(perms, "meetings", ["view", "create"]);
