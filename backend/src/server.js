@@ -37,6 +37,8 @@ app.get("/api/health", async (_req, res) => {
 });
 
 app.use("/api/auth", require("./routes/auth"));
+// Official website webhook is authenticated with a server-side integration secret.
+app.use("/api", require("./routes/website-leads"));
 app.use("/api", crmRoutes);
 app.use("/api", require("./routes/billing"));
 app.use("/api", require("./routes/dashboard"));
