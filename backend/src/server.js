@@ -25,40 +25,31 @@ app.use((_req, res, next) => {
 app.use(cors({ origin: config.corsOrigins, credentials: true }));
 app.use(express.json({ limit: "2mb" }));
 
-// ---------------- health (503 when the database is down) ----------------
 app.get("/api/health", async (_req, res) => {
   try {
     await db.query("SELECT 1");
     const cleanup = await db.one("SELECT value FROM crm_settings WHERE key = 'demo_cleanup_v1'");
-    res.json({
-      status: "ok",
-      database: "connected",
-      version: config.version,
-      demo_data: cleanup ? "clean" : "pending_cleanup",
-    });
+    res.json({ status: "ok", database: "connected", version: config.version, demo_data: cleanup ? "clean" : "pending_cleanup" });
   } catch (e) {
     console.error("[health] database check failed:", e.message);
     res.status(503).json({ status: "degraded", database: "disconnected", version: config.version });
   }
 });
 
-// ---------------- routers ----------------
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api", crmRoutes);
 app.use("/api", require("./routes/billing"));
 app.use("/api", require("./routes/dashboard"));
-// Organization policy validates department/role combinations before employee writes,
-// provides department + calendar CRUD, self-profile editing, and retires AI Assistant routes.
+// Shared calendar read access and owner-only company editing are mounted before organization/admin routes.
+app.use("/api", require("./routes/calendar-view"));
+app.use("/api", require("./routes/company-settings"));
 app.use("/api", require("./routes/organization"));
-// Employee creation needs special handling for a previously soft-deleted email.
 app.use("/api", require("./routes/user-create"));
-// Employee profile + admin password reset routes.
 app.use("/api", require("./routes/user-security"));
 app.use("/api", require("./routes/admin"));
 
 app.use("/api", (_req, res) => res.status(404).json({ detail: "Not Found" }));
 
-// structured errors — never leak stack traces to clients
 app.use((err, req, res, _next) => {
   if (err instanceof HttpError) return res.status(err.status).json({ detail: err.message });
   if (err?.type === "entity.parse.failed") return res.status(422).json({ detail: "Invalid JSON body" });
@@ -66,7 +57,6 @@ app.use((err, req, res, _next) => {
   res.status(err?.status || 500).json({ detail: err?.status ? err.message : "Internal server error" });
 });
 
-// ---------------- boot ----------------
 async function main() {
   if (config.autoMigrate) {
     try {
@@ -85,9 +75,7 @@ async function main() {
   try {
     const result = await cleanupDemoData();
     console.log(`[boot] demo cleanup: ${JSON.stringify(result)}`);
-  } catch (e) {
-    console.error("[boot] demo cleanup failed (continuing):", e.message);
-  }
+  } catch (e) { console.error("[boot] demo cleanup failed (continuing):", e.message); }
   try {
     const swept = await sweepOverdueInvoices();
     if (swept) console.log(`[boot] invoice sweep marked ${swept} invoice(s) overdue`);
@@ -100,5 +88,4 @@ async function main() {
 }
 
 if (require.main === module) main();
-
 module.exports = { app };

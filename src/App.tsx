@@ -6,6 +6,7 @@ import { Btn } from "./components/ui";
 import { PrintProvider, ToastHost } from "./components/ui";
 import AppLayout from "./components/layout";
 import ProfileShortcut from "./components/ProfileShortcut";
+import CompanyDetailsEditor from "./components/CompanyDetailsEditor";
 import Login from "./pages/Login";
 import ChangePassword from "./pages/ChangePassword";
 import UserProfile from "./pages/UserProfile";
@@ -15,13 +16,13 @@ import Discovery from "./pages/Discovery";
 import Pipeline from "./pages/Pipeline";
 import Relations from "./pages/Relations";
 import { FollowUps, TasksPage, MeetingsPage } from "./pages/Workflow";
-import CalendarPage from "./pages/Calendar";
+import CalendarPage from "./pages/CalendarV2";
 import Quotations from "./pages/Quotations";
 import Invoices from "./pages/Invoices";
 import Products from "./pages/Products";
 import Reports from "./pages/Reports";
 import EmployeeManagement from "./pages/EmployeeManagement";
-import Departments from "./pages/Departments";
+import Departments from "./pages/DepartmentsV2";
 import { EmployeesPage, AutomationPage, AuditPage } from "./pages/Admin";
 import Settings from "./pages/Settings";
 import type { ModuleKey } from "./lib/types";
@@ -71,7 +72,7 @@ function Root() {
         <Route path="/followups" element={<Guard mod="followups"><FollowUps /></Guard>} />
         <Route path="/tasks" element={<Guard mod="tasks"><TasksPage /></Guard>} />
         <Route path="/meetings" element={<Guard mod="meetings"><MeetingsPage /></Guard>} />
-        <Route path="/calendar" element={<Guard mod="calendar"><CalendarPage /></Guard>} />
+        <Route path="/calendar" element={<CalendarPage />} />
         <Route path="/quotations" element={<Guard mod="quotations"><Quotations /></Guard>} />
         <Route path="/invoices" element={<Guard mod="invoices"><Invoices /></Guard>} />
         <Route path="/products" element={<Guard mod="products"><Products /></Guard>} />
@@ -90,7 +91,6 @@ function Root() {
   );
 }
 
-/** Production guard: never fall back to browser/demo data when the API is down. */
 function ServerDownGate({ children }: { children: ReactElement }) {
   const { serverDown, retryBoot, booting } = useStore();
   if (!serverDown) return children;
@@ -101,12 +101,8 @@ function ServerDownGate({ children }: { children: ReactElement }) {
           <ServerCrash size={26} />
         </span>
         <h1 className="hd mt-4 text-[20px]">CRM server is unavailable</h1>
-        <p className="mt-2 text-[13px] leading-relaxed text-ink-500">
-          The CRM API cannot be reached right now. Your production data remains in PostgreSQL. Retry after the backend is available.
-        </p>
-        <div className="mt-5 flex flex-col gap-2">
-          <Btn onClick={retryBoot} loading={booting}><RefreshCw size={14} /> Retry connection</Btn>
-        </div>
+        <p className="mt-2 text-[13px] leading-relaxed text-ink-500">The CRM API cannot be reached right now. Your production data remains in PostgreSQL. Retry after the backend is available.</p>
+        <div className="mt-5 flex flex-col gap-2"><Btn onClick={retryBoot} loading={booting}><RefreshCw size={14} /> Retry connection</Btn></div>
       </div>
     </div>
   );
@@ -119,6 +115,7 @@ export default function App() {
         <HashRouter>
           <ServerDownGate><Root /></ServerDownGate>
           <ProfileShortcut />
+          <CompanyDetailsEditor />
           <ToastBridge />
         </HashRouter>
       </PrintProvider>
