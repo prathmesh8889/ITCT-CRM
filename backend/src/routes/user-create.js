@@ -1,5 +1,5 @@
 /**
- * Employee creation override with Step-3 Workforce role enforcement.
+ * Employee creation override with Workforce role enforcement.
  * New/restored users receive the exact department + L1-L6 level defined by
  * their approved role. Retired legacy roles cannot be newly assigned.
  */
@@ -10,6 +10,7 @@ const { requirePerm, hashPassword } = require("../security");
 const { ensureAuthSchema } = require("../auth-schema");
 const { canAssignAccessLevel } = require("../access-levels");
 const { ensureWorkforceRoleSchema } = require("../workforce-role-schema");
+const { ensureTeamSchema } = require("../team-schema");
 
 const router = express.Router();
 const safeUser = (u) => { const { password_hash, ...rest } = u; return rest; };
@@ -19,6 +20,7 @@ router.post("/users", requirePerm("employees", "create"), async (req, res, next)
   try {
     await ensureAuthSchema();
     await ensureWorkforceRoleSchema();
+    await ensureTeamSchema();
     const b = req.body || {};
     const name = String(b.name || "").trim();
     const email = String(b.email || "").trim().toLowerCase();
@@ -58,20 +60,30 @@ router.post("/users", requirePerm("employees", "create"), async (req, res, next)
       throw new HttpError(422, "Only approved Workforce OS roles can be assigned to new employees");
     }
 
-    if (b.team_id != null && b.team_id !== "") {
-      const team = await db.one("SELECT id FROM teams WHERE id = $1", [Number(b.team_id)]);
-      if (!team) throw new HttpError(422, "Selected team no longer exists. Refresh and choose a team again");
-    }
-
     const sameDepartment = !!norm(req.user.department) && norm(req.user.department) === norm(department);
     if (!canAssignAccessLevel(req.accessLevel, accessLevel, { sameDepartment }))
       throw new HttpError(403, "Your access level cannot create an employee at this organizational level");
+
+    // Department Heads are allowed to create employees only in their own
+    // department. The approved role fixes the department; the client cannot
+    // override it by changing form data or calling the API directly.
+    if (Number(req.accessLevel) === 3 && !sameDepartment)
+      throw new HttpError(403, "Department Head can add employees only to their own department");
+
+    let teamId = null;
+    if (b.team_id != null && b.team_id !== "") {
+      teamId = Number(b.team_id);
+      const team = await db.one("SELECT id, name, department, active FROM teams WHERE id = $1", [teamId]);
+      if (!team || !team.active) throw new HttpError(422, "Selected team is unavailable. Refresh and choose a team again");
+      if (!department) throw new HttpError(422, "Global administrator accounts cannot be assigned to a department team");
+      if (norm(team.department) !== norm(department))
+        throw new HttpError(422, `${team.name} belongs to ${team.department}. Select a team from ${department}`);
+    }
 
     const existing = await db.one("SELECT * FROM users WHERE lower(trim(email)) = $1", [email]);
     if (existing && !existing.deleted_at)
       throw new HttpError(422, "An active employee with this email already exists");
 
-    const teamId = b.team_id != null && b.team_id !== "" ? Number(b.team_id) : null;
     let row;
     if (existing?.deleted_at) {
       const r = await db.query(

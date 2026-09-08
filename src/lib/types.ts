@@ -4,7 +4,7 @@ export type ID = string;
 export type ModuleKey =
   | "dashboard" | "leads" | "discovery" | "customers" | "companies" | "contacts"
   | "deals" | "followups" | "tasks" | "meetings" | "calendar" | "quotations"
-  | "invoices" | "payments" | "expenses" | "products" | "employees" | "reports"
+  | "invoices" | "payments" | "expenses" | "products" | "employees" | "teams" | "reports"
   | "automation" | "ai" | "settings" | "audit";
 
 export type Perm = "view" | "create" | "edit" | "delete" | "assign" | "export" | "approve";

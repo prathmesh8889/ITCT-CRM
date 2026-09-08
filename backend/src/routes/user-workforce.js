@@ -1,4 +1,4 @@
-/** Workforce employee update enforcement: role, department and L1-L6 level stay consistent. */
+/** Workforce employee update enforcement: role, department, team and L1-L6 level stay consistent. */
 const express = require("express");
 const { db } = require("../db");
 const { HttpError } = require("../core");
@@ -6,6 +6,7 @@ const { requirePerm } = require("../security");
 const { effectiveAccessLevel, canManageAccessLevel } = require("../access-levels");
 const { canManageTarget, isGlobalAdmin, norm } = require("../workforce-scope");
 const { ensureWorkforceRoleSchema } = require("../workforce-role-schema");
+const { ensureTeamSchema } = require("../team-schema");
 
 const router = express.Router();
 const safeUser = (u) => { const { password_hash, ...rest } = u; return rest; };
@@ -13,6 +14,7 @@ const safeUser = (u) => { const { password_hash, ...rest } = u; return rest; };
 router.patch("/users/:id", requirePerm("employees", "edit"), async (req, res, next) => {
   try {
     await ensureWorkforceRoleSchema();
+    await ensureTeamSchema();
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) throw new HttpError(422, "Invalid employee id");
 
@@ -102,8 +104,13 @@ router.patch("/users/:id", requirePerm("employees", "edit"), async (req, res, ne
     if (!/^\S+@\S+\.\S+$/.test(email)) throw new HttpError(422, "Enter a valid email address");
     if (await db.one("SELECT id FROM users WHERE lower(trim(email)) = $1 AND id <> $2 AND deleted_at IS NULL", [email, id]))
       throw new HttpError(409, "Email already exists");
-    if (teamId != null && !await db.one("SELECT id FROM teams WHERE id = $1", [teamId]))
-      throw new HttpError(422, "Selected team no longer exists");
+
+    if (teamId != null) {
+      const team = await db.one("SELECT id, name, department, active FROM teams WHERE id = $1", [teamId]);
+      if (!team || !team.active) throw new HttpError(422, "Selected team is unavailable");
+      if (!canonicalDepartment || norm(team.department) !== norm(canonicalDepartment))
+        throw new HttpError(422, `${team.name} is not a ${canonicalDepartment || "global"} department team`);
+    }
     if (!isGlobalAdmin(req) && Number(req.accessLevel) === 4 && teamId !== Number(req.user.team_id))
       throw new HttpError(403, "Team Lead can manage only their own team");
 

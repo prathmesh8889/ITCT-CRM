@@ -39,6 +39,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
   ]},
   { section: "Administration", items: [
     { to: "/employees", label: "Employees", icon: Briefcase, mod: "employees" },
+    { to: "/teams", label: "Teams", icon: Users, mod: "teams" },
     { to: "/departments", label: "Departments", icon: Building2, mod: "employees" },
     { to: "/access-levels", label: "Access Levels", icon: ShieldAlert, mod: "employees" },
     { to: "/automation", label: "Automation Rules", icon: Zap, mod: "automation" },
