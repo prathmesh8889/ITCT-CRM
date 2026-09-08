@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Crown, Pencil, Plus, Search, Users } from "lucide-react";
 import { api, DEMO_MODE } from "../lib/api";
 import { useStore } from "../store";
-import { Avatar, Badge, Btn, Field, Input, Modal, Select, Textarea } from "../components/ui";
+import { Avatar, Badge, Btn, Field, Input, Modal, Select } from "../components/ui";
 
 type TeamMember = {
   id: number;
