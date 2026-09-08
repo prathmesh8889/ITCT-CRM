@@ -63,24 +63,25 @@ test("database migration and auth middleware enforce a valid access-level field"
   assert.match(security, /Access level is not configured/);
 });
 
-test("access-level API protects self-change and audits assignments", () => {
+test("access-level API protects self-change and audits legacy assignments", () => {
   const route = read("backend/src/routes/access-levels.js");
   assert.match(route, /router\.get\("\/access-levels"/);
   assert.match(route, /router\.patch\("\/users\/:id\/access-level"/);
   assert.match(route, /You cannot change your own access level/);
   assert.match(route, /Access Level Changed/);
   assert.match(route, /canManageAccessLevel/);
+  assert.match(route, /is fixed by .*Change the approved role instead/);
 });
 
-test("frontend exposes a responsive access-level page without replacing existing departments or roles", () => {
+test("frontend exposes responsive scoped hierarchy status while role controls official levels", () => {
   const app = read("src/App.tsx");
   const page = read("src/pages/AccessLevels.tsx");
-  const shortcut = read("src/components/ProfileShortcut.tsx");
   assert.match(app, /path="\/access-levels"/);
   assert.match(page, /6-Level Access Hierarchy/);
   assert.match(page, /Employee Level Assignment/);
-  assert.match(page, /Deny-by-default foundation/);
-  assert.match(shortcut, /Access Levels/);
+  assert.match(page, /Role-controlled hierarchy/);
+  assert.match(page, /Read-only hierarchy status/);
+  assert.doesNotMatch(page, /void changeLevel/);
   assert.match(app, /path="\/departments"/);
   assert.match(app, /path="\/access-settings"/);
 });

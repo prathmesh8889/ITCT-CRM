@@ -97,9 +97,9 @@ test("department and role catalogs are filtered for non-admin sessions", () => {
 test("CRM list views and dashboards apply department/team row-level owner sets", () => {
   const scoped = read("backend/src/routes/scoped-crm.js");
   const dashboard = read("backend/src/routes/dashboard.js");
-  assert.match(scoped, /assigned_user_id = ANY/);
-  assert.match(scoped, /account_manager_id = ANY/);
-  assert.match(scoped, /created_by = ANY/);
+  assert.match(scoped, /addOwnerScope\(req, where, params, "assigned_user_id"\)/);
+  assert.match(scoped, /addOwnerScope\(req, where, params, "account_manager_id"\)/);
+  assert.match(scoped, /created_by = ANY\(\$1::int\[\]\)/);
   assert.match(scoped, /Selected employee is outside your Workforce OS scope/);
   assert.match(dashboard, /scopedUserIds/);
   assert.match(dashboard, /assigned_user_id = ANY/);
