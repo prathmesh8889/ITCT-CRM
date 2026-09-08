@@ -53,8 +53,8 @@ function Root() {
   const mustChange = !!(user as (typeof user & { mustChangePassword?: boolean }))?.mustChangePassword;
   return <Routes>
     <Route path="/login" element={<LoginGate/>}/>
-    <Route path="/change-password" element={user ? <ChangePassword/> : <Navigate to="/login" replace/>}/>
-    <Route element={user ? (mustChange ? <Navigate to="/change-password" replace/> : <AppLayout/>) : <Navigate to="/login" replace/>}>
+    <Route path="/change-password" element={user ? <ChangePassword/> : <Navigate to="/login" replace />}/>
+    <Route element={user ? (mustChange ? <Navigate to="/change-password" replace /> : <AppLayout/>) : <Navigate to="/login" replace />}>
       <Route path="/profile/:id" element={<UserProfile/>}/>
       <Route path="/dashboard" element={<Guard mod="dashboard"><Dashboard/></Guard>}/>
       <Route path="/department-workspace" element={<DepartmentWorkspace/>}/>
@@ -70,16 +70,16 @@ function Root() {
       <Route path="/invoices" element={<Guard mod="invoices"><Invoices/></Guard>}/>
       <Route path="/products" element={<Guard mod="products"><Products/></Guard>}/>
       <Route path="/reports" element={<Guard mod="reports"><Reports/></Guard>}/>
-      <Route path="/assistant" element={<Navigate to="/dashboard" replace/>}/>
+      <Route path="/assistant" element={<Navigate to="/dashboard" replace />} />
       <Route path="/employees" element={<Guard mod="employees"><EmployeeManagement/></Guard>}/>
       <Route path="/access-levels" element={<Guard mod="employees"><AccessLevels/></Guard>}/>
       <Route path="/departments" element={<Guard mod="employees"><Departments/></Guard>}/>
-      <Route path="/access-settings" element={<Navigate to="/departments" replace/>}/>
+      <Route path="/access-settings" element={<Navigate to="/departments" replace />} />
       <Route path="/automation" element={<Guard mod="automation"><AutomationPage/></Guard>}/>
       <Route path="/audit" element={<Guard mod="audit"><AuditPage/></Guard>}/>
       <Route path="/settings" element={<Guard mod="settings"><Settings/></Guard>}/>
-      <Route path="/" element={<Navigate to="/dashboard" replace/>}/>
-      <Route path="*" element={<Navigate to="/dashboard" replace/>}/>
+      <Route path="/" element={<Navigate to="/dashboard" replace />}/>
+      <Route path="*" element={<Navigate to="/dashboard" replace />}/>
     </Route>
   </Routes>;
 }
