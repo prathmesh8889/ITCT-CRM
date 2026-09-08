@@ -2,10 +2,8 @@ import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import type { ReactElement } from "react";
 import { ShieldAlert, ServerCrash, RefreshCw } from "lucide-react";
 import { StoreProvider, useStore } from "./store";
-import { Btn } from "./components/ui";
-import { PrintProvider, ToastHost } from "./components/ui";
+import { Btn, PrintProvider, ToastHost } from "./components/ui";
 import AppLayout from "./components/layout";
-import ProfileShortcut from "./components/ProfileShortcut";
 import CompanyDetailsEditor from "./components/CompanyDetailsEditor";
 import Login from "./pages/Login";
 import ChangePassword from "./pages/ChangePassword";
@@ -22,9 +20,9 @@ import Invoices from "./pages/Invoices";
 import Products from "./pages/Products";
 import Reports from "./pages/Reports";
 import EmployeeManagement from "./pages/EmployeeManagement";
-import Departments from "./pages/DepartmentsV2";
+import Departments from "./pages/DepartmentsV3";
 import AccessLevels from "./pages/AccessLevels";
-import { EmployeesPage, AutomationPage, AuditPage } from "./pages/Admin";
+import { AutomationPage, AuditPage } from "./pages/Admin";
 import Settings from "./pages/Settings";
 import type { ModuleKey } from "./lib/types";
 
@@ -34,7 +32,7 @@ function NoAccess() {
       <div className="card a-scale-in max-w-sm p-8 text-center">
         <ShieldAlert size={30} className="mx-auto text-amber-500" />
         <h2 className="hd mt-3 text-[17px]">No permission</h2>
-        <p className="mt-1 text-[13px] text-ink-500">Your role doesn't include access to this module. Ask an admin to grant it under Employees & Roles.</p>
+        <p className="mt-1 text-[13px] text-ink-500">This module is not available to your current Workforce OS role. Access is controlled by the approved organizational policy.</p>
       </div>
     </div>
   );
@@ -82,7 +80,8 @@ function Root() {
         <Route path="/employees" element={<Guard mod="employees"><EmployeeManagement /></Guard>} />
         <Route path="/access-levels" element={<Guard mod="employees"><AccessLevels /></Guard>} />
         <Route path="/departments" element={<Guard mod="employees"><Departments /></Guard>} />
-        <Route path="/access-settings" element={<Guard mod="employees"><EmployeesPage /></Guard>} />
+        {/* Legacy manual role/permission editor retired in Step 3. */}
+        <Route path="/access-settings" element={<Navigate to="/departments" replace />} />
         <Route path="/automation" element={<Guard mod="automation"><AutomationPage /></Guard>} />
         <Route path="/audit" element={<Guard mod="audit"><AuditPage /></Guard>} />
         <Route path="/settings" element={<Guard mod="settings"><Settings /></Guard>} />
@@ -99,9 +98,7 @@ function ServerDownGate({ children }: { children: ReactElement }) {
   return (
     <div className="dot-grid flex min-h-screen items-center justify-center bg-paper p-6 dark:bg-[#0b1013]">
       <div className="card a-scale-in w-full max-w-md p-8 text-center">
-        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-dashed border-red-300 text-red-500 dark:border-red-900">
-          <ServerCrash size={26} />
-        </span>
+        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-dashed border-red-300 text-red-500 dark:border-red-900"><ServerCrash size={26} /></span>
         <h1 className="hd mt-4 text-[20px]">CRM server is unavailable</h1>
         <p className="mt-2 text-[13px] leading-relaxed text-ink-500">The CRM API cannot be reached right now. Your production data remains in PostgreSQL. Retry after the backend is available.</p>
         <div className="mt-5 flex flex-col gap-2"><Btn onClick={retryBoot} loading={booting}><RefreshCw size={14} /> Retry connection</Btn></div>
@@ -116,7 +113,6 @@ export default function App() {
       <PrintProvider>
         <HashRouter>
           <ServerDownGate><Root /></ServerDownGate>
-          <ProfileShortcut />
           <CompanyDetailsEditor />
           <ToastBridge />
         </HashRouter>

@@ -1,68 +1,51 @@
 /**
- * Production bootstrap.
- * Creates only system roles and one Super Admin when the database is empty.
- * No demo leads, fake employees, companies, customers, deals or billing data.
+ * Production bootstrap after Workforce OS Step 3.
+ * Creates only the technical L1/L2 identities plus the approved 56 L3-L6
+ * Workforce roles. Legacy CRM roles are never recreated by the seed command.
  */
 const { db, initSchema } = require("./db");
 const { hashPassword } = require("./security");
-
-const ROLES = {
-  "Super Admin": { description: "Full control of every module", system: true, perms: null },
-  "Admin": { description: "Manages CRM configuration and data", system: true, perms: null },
-  "Sales Manager": { description: "Team oversight, assignment and reporting", system: true, perms: {
-    dashboard: ["view"], leads: ["view", "create", "edit", "assign", "export"], discovery: ["view", "create", "edit", "delete"],
-    customers: ["view", "create", "edit", "export"], companies: ["view", "create", "edit"], contacts: ["view", "create", "edit"],
-    deals: ["view", "create", "edit", "assign", "export"], followups: ["view", "create", "edit"],
-    tasks: ["view", "create", "edit", "assign"], meetings: ["view", "create", "edit"], calendar: ["view"],
-    quotations: ["view", "create", "edit", "approve", "export"], invoices: ["view", "create", "edit", "export"],
-    payments: ["view", "create"], expenses: ["view"], products: ["view"], employees: ["view"],
-    reports: ["view", "export"], automation: ["view", "create", "edit"], ai: ["view", "create"], settings: ["view"], audit: ["view"] } },
-  "Sales Executive": { description: "Works assigned leads and deals", system: true, perms: {
-    dashboard: ["view"], leads: ["view", "create", "edit"], customers: ["view", "create"], companies: ["view"],
-    contacts: ["view", "create"], deals: ["view", "create", "edit"], followups: ["view", "create", "edit"],
-    tasks: ["view", "create", "edit"], meetings: ["view", "create"], calendar: ["view"],
-    quotations: ["view", "create", "edit"], invoices: ["view"], payments: ["view"], reports: ["view"], ai: ["view", "create"] } },
-  "Marketing Executive": { description: "Lead discovery and campaigns", system: true, perms: {
-    dashboard: ["view"], leads: ["view", "create", "edit", "export"], discovery: ["view", "create", "edit", "delete"],
-    customers: ["view"], reports: ["view"] } },
-  "Accountant": { description: "Billing, payments and books", system: true, perms: {
-    dashboard: ["view"], quotations: ["view", "create", "edit", "export"], invoices: ["view", "create", "edit", "export"],
-    payments: ["view", "create", "edit", "export"], expenses: ["view", "create", "edit", "export"],
-    customers: ["view"], products: ["view", "create", "edit"], reports: ["view", "export"] } },
-  "Support": { description: "Read-only customer context", system: true, perms: {
-    dashboard: ["view"], customers: ["view"], tasks: ["view", "create", "edit"] } },
-  "Employee": { description: "Basic employee access", system: true, perms: {
-    dashboard: ["view"], tasks: ["view", "create", "edit"] } },
-};
+const { ensureAuthSchema } = require("./auth-schema");
+const { ensureAccessLevelSchema } = require("./access-levels");
+const { ensureOrganizationSchema } = require("./organization-schema");
+const { ensureWorkforceRoleSchema } = require("./workforce-role-schema");
 
 async function main() {
   await initSchema();
+  await ensureAuthSchema();
 
-  const roleIds = {};
-  for (const [name, cfg] of Object.entries(ROLES)) {
-    const r = await db.query(
+  for (const [name, description] of [
+    ["Super Admin", "L1 global Workforce OS authority"],
+    ["Admin", "L2 operational administration authority"],
+  ]) {
+    await db.query(
       `INSERT INTO roles (name, description, system, perms)
-       VALUES ($1,$2,$3,$4)
-       ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description, system = EXCLUDED.system
-       RETURNING id`,
-      [name, cfg.description, cfg.system, cfg.perms === null ? null : JSON.stringify(cfg.perms)],
+       VALUES ($1,$2,TRUE,NULL)
+       ON CONFLICT (name) DO UPDATE SET description=EXCLUDED.description, system=TRUE`,
+      [name, description],
     );
-    roleIds[name] = r.rows[0].id;
   }
+
+  await ensureAccessLevelSchema();
+  await ensureOrganizationSchema();
+  await ensureWorkforceRoleSchema();
 
   const existingUsers = await db.one("SELECT COUNT(*)::int AS n FROM users WHERE deleted_at IS NULL");
   if (!existingUsers?.n) {
+    const superRole = await db.one("SELECT id FROM roles WHERE name = 'Super Admin'");
     await db.query(
-      `INSERT INTO users (name, email, phone, password_hash, department, designation, role_id, is_sales, active, color)
-       VALUES ('Super Admin','admin@crm.local','',$1,'Administration','Super Admin',$2,FALSE,TRUE,'#0F766E')`,
-      [hashPassword("Admin@123"), roleIds["Super Admin"]],
+      `INSERT INTO users
+         (name, email, phone, password_hash, department, designation, role_id,
+          is_sales, active, color, access_level, must_change_password)
+       VALUES ('Super Admin','admin@crm.local','',$1,'','Super Admin',$2,FALSE,TRUE,'#0F766E',1,TRUE)`,
+      [hashPassword("Admin@123"), superRole.id],
     );
     console.log("[bootstrap] Super Admin created: admin@crm.local / Admin@123 — change this password immediately");
   } else {
     console.log(`[bootstrap] ${existingUsers.n} existing user(s); no sample users created`);
   }
 
-  console.log("[bootstrap] system roles ready; no demo business data created");
+  console.log("[bootstrap] Workforce OS roles ready: 2 global identities + 56 approved department roles; no demo business data created");
   await db.end();
 }
 

@@ -11,6 +11,7 @@ const { cleanupDemoData } = require("./cleanup-demo");
 const { ensureAuthSchema } = require("./auth-schema");
 const { ensureAccessLevelSchema } = require("./access-levels");
 const { ensureOrganizationSchema } = require("./organization-schema");
+const { ensureWorkforceRoleSchema } = require("./workforce-role-schema");
 const { router: crmRoutes, startDiscoveryWorker } = require("./routes/crm");
 
 const app = express();
@@ -41,12 +42,15 @@ app.use("/api/auth", require("./routes/auth"));
 app.use("/api", crmRoutes);
 app.use("/api", require("./routes/billing"));
 app.use("/api", require("./routes/dashboard"));
-// Organizational access-level foundation is mounted before employee/admin routes.
 app.use("/api", require("./routes/access-levels"));
-// Shared calendar read access and owner-only company editing are mounted before organization/admin routes.
 app.use("/api", require("./routes/calendar-view"));
 app.use("/api", require("./routes/company-settings"));
-// Dedicated department-member endpoint avoids loading/filtering the entire user directory in the browser.
+
+// Step 3 Workforce OS: exact role catalog, read-enriched departments and
+// atomic user role/department updates take precedence over legacy admin routes.
+app.use("/api", require("./routes/workforce-roles"));
+app.use("/api", require("./routes/department-catalog-view"));
+app.use("/api", require("./routes/user-workforce"));
 app.use("/api", require("./routes/department-members"));
 app.use("/api", require("./routes/organization"));
 app.use("/api", require("./routes/user-create"));
@@ -69,6 +73,7 @@ async function main() {
       await ensureAuthSchema();
       await ensureAccessLevelSchema();
       await ensureOrganizationSchema();
+      await ensureWorkforceRoleSchema();
       console.log("[boot] schema ready (CREATE/ALTER IF NOT EXISTS)");
     } catch (e) {
       console.error(`[boot] FATAL — cannot reach PostgreSQL at ${config.databaseUrl}\n       ${e.message}`);
@@ -78,6 +83,7 @@ async function main() {
     await ensureAuthSchema();
     await ensureAccessLevelSchema();
     await ensureOrganizationSchema();
+    await ensureWorkforceRoleSchema();
   }
   try {
     const result = await cleanupDemoData();
