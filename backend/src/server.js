@@ -1,7 +1,4 @@
-/**
- * ITCT CRM API — Node.js + Express + PostgreSQL.
- * Run: npm start (or: node src/server.js) → http://localhost:8000
- */
+/** ITCT CRM API — Node.js + Express + PostgreSQL. */
 const express = require("express");
 const cors = require("cors");
 const { db, initSchema } = require("./db");
@@ -12,6 +9,7 @@ const { ensureAuthSchema } = require("./auth-schema");
 const { ensureAccessLevelSchema } = require("./access-levels");
 const { ensureOrganizationSchema } = require("./organization-schema");
 const { ensureWorkforceRoleSchema } = require("./workforce-role-schema");
+const { ensureWorkforceDomainSchema } = require("./workforce-domain-schema");
 const { internSanitizer } = require("./intern-sanitizer");
 const { router: crmRoutes, startDiscoveryWorker } = require("./routes/crm");
 
@@ -39,12 +37,12 @@ app.get("/api/health", async (_req, res) => {
   }
 });
 
-// Wrap JSON first. Authenticated L6 routes set req.accessLevel later and the
-// response is sanitized when res.json finally executes.
 app.use("/api", internSanitizer);
 app.use("/api/auth", require("./routes/auth"));
 
-// Row-level scoped views/guards must run before the legacy CRM router.
+// PDF-defined department services and project/intern workspaces are resolved
+// before the legacy CRM so every request is department + level verified.
+app.use("/api", require("./routes/department-workspace"));
 app.use("/api", require("./routes/scoped-crm"));
 app.use("/api", crmRoutes);
 app.use("/api", require("./routes/billing"));
@@ -52,8 +50,6 @@ app.use("/api", require("./routes/dashboard"));
 app.use("/api", require("./routes/access-levels"));
 app.use("/api", require("./routes/calendar-view"));
 app.use("/api", require("./routes/company-settings"));
-
-// Workforce OS source-of-truth routes take precedence over legacy admin routes.
 app.use("/api", require("./routes/workforce-roles"));
 app.use("/api", require("./routes/department-catalog-view"));
 app.use("/api", require("./routes/department-directory"));
@@ -66,7 +62,6 @@ app.use("/api", require("./routes/user-security"));
 app.use("/api", require("./routes/admin"));
 
 app.use("/api", (_req, res) => res.status(404).json({ detail: "Not Found" }));
-
 app.use((err, req, res, _next) => {
   if (err instanceof HttpError) return res.status(err.status).json({ detail: err.message });
   if (err?.type === "entity.parse.failed") return res.status(422).json({ detail: "Invalid JSON body" });
@@ -82,6 +77,7 @@ async function main() {
       await ensureAccessLevelSchema();
       await ensureOrganizationSchema();
       await ensureWorkforceRoleSchema();
+      await ensureWorkforceDomainSchema();
       console.log("[boot] schema ready (CREATE/ALTER IF NOT EXISTS)");
     } catch (e) {
       console.error(`[boot] FATAL — cannot reach PostgreSQL at ${config.databaseUrl}\n       ${e.message}`);
@@ -92,6 +88,7 @@ async function main() {
     await ensureAccessLevelSchema();
     await ensureOrganizationSchema();
     await ensureWorkforceRoleSchema();
+    await ensureWorkforceDomainSchema();
   }
   try {
     const result = await cleanupDemoData();
