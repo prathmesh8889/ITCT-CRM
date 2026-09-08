@@ -37,6 +37,38 @@ test("department-member endpoint supports list candidate assign and remove opera
   assert.match(route, /team_name/);
 });
 
+test("department teams have a real route, sidebar page and scoped backend", () => {
+  const app = read("src/App.tsx");
+  const layout = read("src/components/layout.tsx");
+  const page = read("src/pages/Teams.tsx");
+  const server = read("backend/src/server.js");
+  const route = read("backend/src/routes/workforce-teams.js");
+  const schema = read("backend/src/team-schema.js");
+  assert.match(app, /path="\/teams"/);
+  assert.match(layout, /to: "\/teams", label: "Teams"/);
+  assert.match(page, /Create Team/);
+  assert.match(page, /Team Lead/);
+  assert.match(page, /Focus \/ Project/);
+  assert.match(server, /workforce-teams/);
+  assert.match(server, /ensureTeamSchema/);
+  assert.match(route, /Department Head can manage teams only in their own department/);
+  assert.match(route, /Team Lead must be an active L4 employee/);
+  assert.match(route, /belongs to another department/);
+  assert.match(schema, /ALTER TABLE teams ADD COLUMN IF NOT EXISTS department/);
+});
+
+test("department heads can create employees only inside their own department", () => {
+  const perms = read("backend/src/workforce-permissions.js");
+  const create = read("backend/src/routes/user-create.js");
+  const editor = read("src/pages/EmployeeManagement.tsx");
+  assert.match(perms, /"employees", \["view", "create", "edit"\]/);
+  assert.match(perms, /"teams", \["view", "create", "edit"\]/);
+  assert.match(create, /Department Head can add employees only to their own department/);
+  assert.match(create, /team\.department/);
+  assert.match(editor, /departmentLocked/);
+  assert.match(editor, /Fixed to your Department Head scope/);
+});
+
 test("calendar uses a normal 42-cell month grid and explicit add buttons", () => {
   const src = read("src/pages/CalendarV2.tsx");
   assert.match(src, /length: 42/);
@@ -87,7 +119,7 @@ test("floating Workforce shortcuts are removed and moved into desktop/mobile sid
   const app = read("src/App.tsx");
   const layout = read("src/components/layout.tsx");
   assert.doesNotMatch(app, /ProfileShortcut/);
-  for (const label of ["Calendar", "Employees", "Departments", "Access Levels", "My Profile"])
+  for (const label of ["Calendar", "Employees", "Teams", "Departments", "Access Levels", "My Profile"])
     assert.ok(layout.includes(label), `sidebar missing ${label}`);
   assert.match(layout, /mobileOpen/);
   assert.match(layout, /md:hidden/);
