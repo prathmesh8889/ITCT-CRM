@@ -9,6 +9,7 @@ const { config, HttpError } = require("./core");
 const { sweepOverdueInvoices } = require("./engines");
 const { cleanupDemoData } = require("./cleanup-demo");
 const { ensureAuthSchema } = require("./auth-schema");
+const { ensureOrganizationSchema } = require("./organization-schema");
 const { router: crmRoutes, startDiscoveryWorker } = require("./routes/crm");
 
 const app = express();
@@ -46,6 +47,9 @@ app.use("/api/auth", require("./routes/auth"));
 app.use("/api", crmRoutes);
 app.use("/api", require("./routes/billing"));
 app.use("/api", require("./routes/dashboard"));
+// Organization policy validates department/role combinations before employee writes,
+// provides department + calendar CRUD, self-profile editing, and retires AI Assistant routes.
+app.use("/api", require("./routes/organization"));
 // Employee creation needs special handling for a previously soft-deleted email.
 app.use("/api", require("./routes/user-create"));
 // Employee profile + admin password reset routes.
@@ -68,6 +72,7 @@ async function main() {
     try {
       await initSchema();
       await ensureAuthSchema();
+      await ensureOrganizationSchema();
       console.log("[boot] schema ready (CREATE/ALTER IF NOT EXISTS)");
     } catch (e) {
       console.error(`[boot] FATAL — cannot reach PostgreSQL at ${config.databaseUrl}\n       ${e.message}`);
@@ -75,6 +80,7 @@ async function main() {
     }
   } else {
     await ensureAuthSchema();
+    await ensureOrganizationSchema();
   }
   try {
     const result = await cleanupDemoData();

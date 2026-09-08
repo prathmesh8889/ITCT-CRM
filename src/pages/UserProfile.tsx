@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Briefcase, CalendarDays, KeyRound, ListChecks, Mail, Phone, Target, UserRound, Users } from "lucide-react";
+import { ArrowLeft, Briefcase, CalendarDays, KeyRound, ListChecks, Mail, Pencil, Phone, Target, UserRound, Users } from "lucide-react";
 import { api } from "../lib/api";
 import { useStore } from "../store";
-import { Avatar, Badge, Btn } from "../components/ui";
+import { Avatar, Badge, Btn, Field, Input, Modal } from "../components/ui";
 import { fmtDT } from "../lib/services";
 
 type ProfileResponse = {
@@ -19,13 +19,18 @@ type ProfileResponse = {
   summary: { leads: number; tasks: number; deals: number; followups: number };
 };
 
+type EditForm = { name: string; email: string; phone: string };
+
 export default function UserProfile() {
   const { id } = useParams();
-  const { user, toast } = useStore();
+  const { user, toast, refreshMe } = useStore();
   const nav = useNavigate();
   const targetId = id === "me" || !id ? user?.id : id;
   const [data, setData] = useState<ProfileResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState<EditForm>({ name: "", email: "", phone: "" });
 
   useEffect(() => {
     if (!targetId) return;
@@ -43,11 +48,33 @@ export default function UserProfile() {
 
   const p = data.user;
   const own = String(p.id) === user?.id;
+
+  const openEdit = () => {
+    setForm({ name: p.name, email: p.email, phone: p.phone || "" });
+    setEditing(true);
+  };
+
+  const saveProfile = async () => {
+    const name = form.name.trim();
+    const email = form.email.trim().toLowerCase();
+    if (!name || !email) { toast("Name and email are required", "err"); return; }
+    setBusy(true);
+    try {
+      const r = await api.patch<ProfileResponse["user"]>("/users/me/profile", { name, email, phone: form.phone.trim() });
+      setData((prev) => prev ? { ...prev, user: { ...prev.user, ...r.data } } : prev);
+      await refreshMe();
+      setEditing(false);
+      toast("Profile updated", "ok");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not update profile", "err");
+    } finally { setBusy(false); }
+  };
+
   return (
     <div className="mx-auto max-w-[1050px] p-4 md:p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <Btn variant="ghost" size="sm" onClick={() => nav(-1)}><ArrowLeft size={14} /> Back</Btn>
-        {own && <Btn variant="outline" size="sm" onClick={() => nav("/change-password")}><KeyRound size={14} /> Change my password</Btn>}
+        {own && <div className="flex flex-wrap gap-2"><Btn variant="outline" size="sm" onClick={openEdit}><Pencil size={14} /> Edit profile</Btn><Btn variant="outline" size="sm" onClick={() => nav("/change-password")}><KeyRound size={14} /> Change my password</Btn></div>}
       </div>
 
       <div className="card overflow-hidden">
@@ -92,6 +119,19 @@ export default function UserProfile() {
           </div>
         </div>
       </div>
+
+      {editing && (
+        <Modal open onClose={() => !busy && setEditing(false)} title="Edit my profile" footer={
+          <><Btn variant="ghost" onClick={() => setEditing(false)}>Cancel</Btn><Btn loading={busy} onClick={() => void saveProfile()}>Save profile</Btn></>
+        }>
+          <div className="grid gap-3">
+            <Field label="Full name" req><Input value={form.name} onChange={(e) => setForm((x) => ({ ...x, name: e.target.value }))} /></Field>
+            <Field label="Email" req><Input type="email" value={form.email} onChange={(e) => setForm((x) => ({ ...x, email: e.target.value }))} /></Field>
+            <Field label="Phone"><Input value={form.phone} onChange={(e) => setForm((x) => ({ ...x, phone: e.target.value }))} /></Field>
+            <div className="rounded-lg border border-ink-200 bg-ink-50 p-3 text-[11.5px] text-ink-500 dark:border-ink-700 dark:bg-ink-800/40">Department, role, team and designation are controlled by CRM administrators.</div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

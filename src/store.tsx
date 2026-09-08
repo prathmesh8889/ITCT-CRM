@@ -33,6 +33,7 @@ interface StoreCtx {
   booting: boolean;
   serverDown: boolean;
   retryBoot: () => void;
+  refreshMe: () => Promise<void>;
   login: (email: string, pw: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
   can: (m: ModuleKey, p?: Perm) => boolean;
@@ -104,6 +105,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => { live = false; };
   }, [bootKey]);
 
+  const refreshMe = useCallback(async () => {
+    if (DEMO_MODE) {
+      const id = user?.id || localStorage.getItem(SKEY);
+      const local = id ? getDB().users.find((x) => x.id === id) : null;
+      if (local) {
+        setUser({ ...local });
+        setRoleName(getDB().roles.find((r) => r.id === local.roleId)?.name || "");
+      }
+      return;
+    }
+    const me = (await authApi.me()).data as MeResponse;
+    setUser(mapMeUser(me));
+    setPerms(me.perms || {});
+    setIsSuper(me.is_super);
+    setRoleName(me.role || "");
+  }, [user?.id]);
+
   const login = useCallback(async (email: string, pw: string) => {
     if (!DEMO_MODE) {
       try {
@@ -151,6 +169,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const can = useCallback((m: ModuleKey, p: Perm = "view") => {
     if (!user) return false;
+    // AI Assistant is intentionally retired even if an old role still contains an `ai` permission entry.
+    if (m === "ai") return false;
     if (!DEMO_MODE) {
       if (isSuper) return true;
       return !!perms[m]?.includes(p);
@@ -180,7 +200,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <Ctx.Provider value={{ user, mode, roleName, booting, serverDown, retryBoot, login, logout, can, toasts, toast, dropToast, dark, toggleDark }}>
+    <Ctx.Provider value={{ user, mode, roleName, booting, serverDown, retryBoot, refreshMe, login, logout, can, toasts, toast, dropToast, dark, toggleDark }}>
       {children}
     </Ctx.Provider>
   );

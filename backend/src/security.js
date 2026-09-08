@@ -24,8 +24,8 @@ const newRefreshHash = () => sha256(crypto.randomBytes(32).toString("hex"));
 
 // ---------------- RBAC catalog ----------------
 const MODULES = ["dashboard", "leads", "discovery", "customers", "companies", "contacts", "deals",
-  "followups", "tasks", "meetings", "calls", "products", "quotations", "invoices", "payments",
-  "expenses", "employees", "teams", "reports", "notifications", "automation", "audit", "settings", "ai"];
+  "followups", "tasks", "meetings", "calendar", "calls", "products", "quotations", "invoices", "payments",
+  "expenses", "employees", "teams", "reports", "notifications", "automation", "audit", "settings"];
 const PERMS = ["view", "create", "edit", "delete", "assign", "export", "approve"];
 const SUPER_ROLES = new Set(["Super Admin", "Admin"]);
 
@@ -33,6 +33,27 @@ const rolePerms = (roleName, perms, module, perm) => {
   if (SUPER_ROLES.has(roleName)) return true;
   return Array.isArray(perms?.[module]) && perms[module].includes(perm);
 };
+
+async function enforceDepartmentRole(user, role) {
+  if (SUPER_ROLES.has(role.name) || !String(user.department || "").trim()) return null;
+  try {
+    const department = await db.one(
+      "SELECT id, name, active, allowed_role_ids FROM departments WHERE lower(name) = lower($1)",
+      [String(user.department).trim()],
+    );
+    // Legacy departments remain usable until an admin creates/configures them.
+    if (!department) return null;
+    if (!department.active) throw new HttpError(403, "Your department is disabled");
+    const allowed = Array.isArray(department.allowed_role_ids) ? department.allowed_role_ids.map(Number) : [];
+    if (allowed.length && !allowed.includes(Number(role.id)))
+      throw new HttpError(403, `Your role is not enabled for the ${department.name} department`);
+    return department;
+  } catch (e) {
+    // Unit tests and pre-migration environments may load auth before the organization schema exists.
+    if (e?.code === "42P01") return null;
+    throw e;
+  }
+}
 
 // ---------------- middleware ----------------
 async function requireAuth(req, _res, next) {
@@ -47,6 +68,7 @@ async function requireAuth(req, _res, next) {
     if (!user || !user.active || user.deleted_at) throw new HttpError(401, "Account is disabled");
     const role = await db.one("SELECT * FROM roles WHERE id = $1", [user.role_id]);
     if (!role) throw new HttpError(403, "Role missing");
+    const department = await enforceDepartmentRole(user, role);
 
     // A temporary/reset password can authenticate only to auth endpoints needed
     // to inspect the session, change the password, or sign out. CRM data stays locked.
@@ -57,6 +79,7 @@ async function requireAuth(req, _res, next) {
 
     req.user = user;
     req.role = role;
+    req.department = department;
     next();
   } catch (e) { next(e); }
 }
