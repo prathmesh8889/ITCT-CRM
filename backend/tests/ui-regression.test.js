@@ -16,11 +16,24 @@ test("active departments page exposes add/edit and a visible employee viewer", (
   assert.match(src, /departments\/\$\{row\.id\}\/employees/);
 });
 
-test("department-member endpoint is mounted and returns role/team details", () => {
+test("department members can be added, moved and removed from the active modal", () => {
+  const src = read("src/pages/DepartmentsV2.tsx");
+  assert.match(src, /Add \/ Move Employee/);
+  assert.match(src, /Remove from Department/);
+  assert.match(src, /\/candidates/);
+  assert.match(src, /api\.post\(`\/departments\/\$\{memberDepartment\.id\}\/employees`/);
+  assert.match(src, /api\.delete\(`\/departments\/\$\{memberDepartment\.id\}\/employees\/\$\{employee\.id\}`/);
+});
+
+test("department-member endpoint supports list, candidate, assign and remove operations", () => {
   const server = read("backend/src/server.js");
   const route = read("backend/src/routes/department-members.js");
   assert.match(server, /department-members/);
-  assert.match(route, /departments\/:id\/employees/);
+  assert.match(route, /router\.get\("\/departments\/:id\/employees"/);
+  assert.match(route, /router\.get\("\/departments\/:id\/candidates"/);
+  assert.match(route, /router\.post\("\/departments\/:id\/employees"/);
+  assert.match(route, /router\.delete\("\/departments\/:id\/employees\/:userId"/);
+  assert.match(route, /Employee Removed From Department/);
   assert.match(route, /role_name/);
   assert.match(route, /team_name/);
 });
