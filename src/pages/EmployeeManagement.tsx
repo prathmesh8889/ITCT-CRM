@@ -75,22 +75,24 @@ function EmployeeEditor({
 }) {
   const { toast } = useStore();
   const d = useDB();
+  const approvedDepartments = useMemo(
+    () => departments.filter((x) => x.system && x.active),
+    [departments],
+  );
+  const departmentLocked = !employee && approvedDepartments.length === 1;
+  const defaultDepartment = employee?.department || (departmentLocked ? approvedDepartments[0].name : "");
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState<FormState>(() => ({
     name: employee?.name || "",
     email: employee?.email || "",
     phone: employee?.phone || "",
-    department: employee?.department || "",
+    department: defaultDepartment,
     roleId: employee?.role_id ? String(employee.role_id) : "",
     teamId: employee?.team_id ? String(employee.team_id) : "",
     password: employee ? "" : tempPassword(),
     active: employee?.active !== false,
   }));
 
-  const approvedDepartments = useMemo(
-    () => departments.filter((x) => x.system && x.active),
-    [departments],
-  );
   const availableRoles = useMemo(
     () => roles.filter((x) => x.assignment_enabled && x.department === form.department),
     [roles, form.department],
@@ -104,7 +106,7 @@ function EmployeeEditor({
   const changeDepartment = (department: string) => {
     setForm((p) => {
       const role = roles.find((x) => String(x.id) === p.roleId);
-      return { ...p, department, roleId: role?.department === department ? p.roleId : "" };
+      return { ...p, department, roleId: role?.department === department ? p.roleId : "", teamId: "" };
     });
   };
 
@@ -152,7 +154,7 @@ function EmployeeEditor({
       <><Btn variant="ghost" onClick={onClose}>Cancel</Btn><Btn loading={busy} onClick={() => void save()}>{employee ? "Save changes" : "Create employee"}</Btn></>
     }>
       <div className="mb-4 rounded-lg border border-brand-100 bg-brand-50/60 p-3 text-[11.5px] leading-relaxed text-brand-800 dark:border-brand-900 dark:bg-brand-950/20 dark:text-brand-200">
-        <strong>Step 3 rule:</strong> department and role are linked by the approved Workforce OS specification. Selecting a role automatically fixes its L3–L6 access level.
+        <strong>Workforce rule:</strong> department and role are linked by the approved Workforce OS specification. Department Heads can add employees only inside their own department; the department is locked automatically.
       </div>
       {employee && !existingRoleIsApproved && (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11.5px] text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
@@ -166,11 +168,12 @@ function EmployeeEditor({
         {!employee && <Field label="Temporary password" req><div className="flex gap-2"><Input value={form.password} onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))} /><Btn type="button" size="xs" variant="outline" onClick={() => setForm((p) => ({ ...p, password: tempPassword() }))}>Generate</Btn></div></Field>}
 
         <Field label="Department" req>
-          <Select value={form.department} onChange={(e) => changeDepartment(e.target.value)}>
+          <Select value={form.department} onChange={(e) => changeDepartment(e.target.value)} disabled={departmentLocked}>
             <option value="">Select approved department</option>
             {approvedDepartments.map((dept) => <option key={dept.id} value={dept.name}>{dept.name}</option>)}
             {employee?.department && !approvedDepartments.some((x) => x.name === employee.department) && <option value={employee.department}>{employee.department} (legacy)</option>}
           </Select>
+          {departmentLocked && <div className="mt-1 text-[10.5px] text-brand-600">Fixed to your Department Head scope: {form.department}</div>}
         </Field>
         <Field label="Approved role" req>
           <Select value={form.roleId} onChange={(e) => setForm((p) => ({ ...p, roleId: e.target.value }))}>
