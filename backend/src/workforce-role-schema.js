@@ -1,7 +1,8 @@
-/** Step 3 database migration/synchronization for the approved Workforce OS role catalog. */
+/** Step 3/4 database synchronization for the approved Workforce OS role catalog. */
 const { db } = require("./db");
 const { ensureOrganizationSchema } = require("./organization-schema");
 const { WORKFORCE_ROLES } = require("./workforce-roles");
+const { workforcePermissions } = require("./workforce-permissions");
 
 let ready = null;
 
@@ -29,6 +30,7 @@ function ensureWorkforceRoleSchema() {
 
       await db.tx(async (client) => {
         for (const role of WORKFORCE_ROLES) {
+          const perms = workforcePermissions(role);
           await client.query(
             `INSERT INTO roles
                (name, description, system, perms, department_key, access_level,
@@ -37,6 +39,7 @@ function ensureWorkforceRoleSchema() {
              ON CONFLICT (name) DO UPDATE SET
                description = EXCLUDED.description,
                system = TRUE,
+               perms = EXCLUDED.perms,
                department_key = EXCLUDED.department_key,
                access_level = EXCLUDED.access_level,
                primary_function = EXCLUDED.primary_function,
@@ -45,7 +48,7 @@ function ensureWorkforceRoleSchema() {
             [
               role.title,
               `L${role.level} · ${role.department} · ${role.primary_function}`,
-              JSON.stringify({ dashboard: ["view"] }),
+              JSON.stringify(perms),
               role.department_key,
               role.level,
               role.primary_function,
@@ -53,8 +56,8 @@ function ensureWorkforceRoleSchema() {
           );
         }
 
-        // Super Admin and Admin remain the technical L1/L2 global identities.
-        // They are not part of the department-specific L3-L6 role catalog.
+        // L1/L2 are the only global identities. Their legacy `perms = null`
+        // behavior remains intentional because security.js treats them as full access.
         await client.query(`
           UPDATE roles
              SET access_level = CASE WHEN lower(trim(name)) = 'super admin' THEN 1 ELSE 2 END,
@@ -64,9 +67,8 @@ function ensureWorkforceRoleSchema() {
            WHERE lower(trim(name)) IN ('super admin','admin')
         `);
 
-        // Old/custom role rows are preserved because users may reference them,
-        // but they cannot be newly assigned after Step 3. This prevents data loss
-        // while making the PDF role catalog the source of truth for new changes.
+        // Old/custom roles stay attached to historical users but cannot be newly
+        // assigned. This prevents data loss while keeping the PDF catalog canonical.
         await client.query(`
           UPDATE roles
              SET assignment_enabled = FALSE
@@ -74,14 +76,13 @@ function ensureWorkforceRoleSchema() {
              AND lower(trim(name)) NOT IN ('super admin','admin')
         `);
 
-        // Exact existing Workforce roles can be canonicalized safely: the PDF
-        // defines one department and one level for each title. No fuzzy role-name
-        // mapping is attempted for legacy titles such as Accountant/Support.
+        // Exact existing Workforce roles are safe to canonicalize: role title ->
+        // one department + one level. No fuzzy mapping of legacy role titles occurs.
         await client.query(`
           UPDATE users u
              SET access_level = r.access_level,
                  department = d.name,
-                 designation = CASE WHEN trim(COALESCE(u.designation,'')) = '' THEN r.name ELSE u.designation END
+                 designation = r.name
             FROM roles r
             JOIN departments d ON d.system_key = r.department_key AND d.system = TRUE
            WHERE u.role_id = r.id

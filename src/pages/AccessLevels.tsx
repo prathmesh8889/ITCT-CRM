@@ -3,7 +3,7 @@ import { Search, ShieldAlert, Users } from "lucide-react";
 import { api, DEMO_MODE } from "../lib/api";
 import { useDB } from "../lib/db";
 import { useStore } from "../store";
-import { Badge, Select } from "../components/ui";
+import { Badge } from "../components/ui";
 
 type LevelNumber = 1 | 2 | 3 | 4 | 5 | 6;
 type LevelDef = {
@@ -30,10 +30,10 @@ type EmployeeRow = {
 const baseLevels: LevelDef[] = [
   { level: 1, code: "L1", name: "Super Admin / CEO", scope: "Global Control", data_visibility: "Full organization, strategic KPIs and financial visibility", summary: "Highest organizational authority and global control.", member_count: 0 },
   { level: 2, code: "L2", name: "Operational Admin / COO", scope: "Global Operations", data_visibility: "Cross-department operations, utilization, SLA and performance visibility", summary: "Runs company-wide operations below the CEO layer.", member_count: 0 },
-  { level: 3, code: "L3", name: "Department Head / HOD", scope: "Department Ownership", data_visibility: "Department-level people, budgets, hiring and performance", summary: "Owns one department and its routine decisions.", member_count: 0 },
-  { level: 4, code: "L4", name: "Team Lead", scope: "Team Workspace", data_visibility: "Assigned team, daily execution, sprint/task visibility", summary: "Owns execution for an assigned team.", member_count: 0 },
+  { level: 3, code: "L3", name: "Department Head / HOD", scope: "Department Ownership", data_visibility: "Only the assigned department and its subordinate work", summary: "Owns one department and its routine decisions.", member_count: 0 },
+  { level: 4, code: "L4", name: "Team Lead", scope: "Team Workspace", data_visibility: "Only the assigned team and team execution", summary: "Owns execution for an assigned team.", member_count: 0 },
   { level: 5, code: "L5", name: "Full-Time Employee", scope: "Individual Workspace", data_visibility: "Own tasks, assigned CRM records and personal KPIs", summary: "Individual execution layer.", member_count: 0 },
-  { level: 6, code: "L6", name: "Intern", scope: "Restricted / Sandbox", data_visibility: "Restricted learning workspace; masking/sandbox policies are applied in later security steps", summary: "Lowest-trust supervised learning and support layer.", member_count: 0 },
+  { level: 6, code: "L6", name: "Intern", scope: "Restricted / Sandbox", data_visibility: "Restricted tasks with masked PII and no bulk export", summary: "Supervised learning and support layer.", member_count: 0 },
 ];
 
 const tone = (level: number): "red" | "amber" | "violet" | "blue" | "green" | "slate" =>
@@ -50,13 +50,12 @@ function inferredLevel(roleName: string): LevelNumber {
 }
 
 export default function AccessLevels() {
-  const { user, can, toast } = useStore();
+  const { toast } = useStore();
   const d = useDB();
   const [levels, setLevels] = useState<LevelDef[]>(baseLevels);
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
-  const [busyId, setBusyId] = useState<string | null>(null);
 
   const roleName = (roleId: number | string) => d.roles.find((r) => String(r.id) === String(roleId))?.name || "No role";
   const levelOf = (employee: EmployeeRow): LevelNumber => {
@@ -100,33 +99,6 @@ export default function AccessLevels() {
     });
   }, [employees, query, d.roles]);
 
-  const changeLevel = async (employee: EmployeeRow, next: LevelNumber) => {
-    const current = levelOf(employee);
-    if (current === next) return;
-    if (String(employee.id) === String(user?.id)) {
-      toast("You cannot change your own access level", "warn");
-      return;
-    }
-    const target = levels.find((x) => x.level === next);
-    if (!window.confirm(`Change ${employee.name} from L${current} to L${next} - ${target?.name || "Access Level"}?`)) return;
-    if (DEMO_MODE) { toast("Access-level changes require the backend workspace", "warn"); return; }
-
-    setBusyId(String(employee.id));
-    try {
-      const r = await api.patch<EmployeeRow>(`/users/${employee.id}/access-level`, { access_level: next });
-      setEmployees((xs) => xs.map((x) => String(x.id) === String(employee.id) ? { ...x, ...r.data, access_level: next } : x));
-      setLevels((xs) => xs.map((x) => ({
-        ...x,
-        member_count: x.level === current ? Math.max(0, x.member_count - 1) : x.level === next ? x.member_count + 1 : x.member_count,
-      })));
-      toast("Access level updated", "ok", `${employee.name} → L${next} ${target?.name || ""}`);
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "Could not change access level", "err");
-    } finally { setBusyId(null); }
-  };
-
-  const canEdit = can("employees", "edit");
-
   return (
     <div className="mx-auto max-w-[1240px] p-3 sm:p-4 md:p-6">
       <div className="mb-5">
@@ -134,11 +106,13 @@ export default function AccessLevels() {
           <ShieldAlert size={21} className="text-brand-600" />
           <h1 className="hd text-[22px]">6-Level Access Hierarchy</h1>
         </div>
-        <p className="mt-1 text-[12.5px] text-ink-500">Step 1 foundation for organizational access. Levels are separate from job roles so the next department and role-mapping steps can be added safely.</p>
+        <p className="mt-1 max-w-3xl text-[12.5px] leading-relaxed text-ink-500">
+          Workforce levels are now bound to the approved role catalog. Super Admin/Admin are global; all other levels are restricted to department, team or personal scope.
+        </p>
       </div>
 
-      <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[12px] leading-relaxed text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/25 dark:text-amber-200">
-        <strong>Deny-by-default foundation:</strong> only higher authorized levels can assign lower organizational levels. Existing CRM module permissions remain role-based for now; department/team row-level filtering and Intern PII masking/export restrictions will be wired in their dedicated later steps instead of being guessed here.
+      <div className="mb-5 rounded-lg border border-brand-200 bg-brand-50/70 p-3 text-[12px] leading-relaxed text-brand-900 dark:border-brand-900/60 dark:bg-brand-950/25 dark:text-brand-200">
+        <strong>Role-controlled hierarchy:</strong> L3–L6 is not edited separately anymore. Change an employee's approved role from <strong>Employees</strong>; the correct department and level are applied automatically. Counts and employees on this page are limited to the viewer's Workforce OS scope.
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -157,10 +131,10 @@ export default function AccessLevels() {
         ))}
       </div>
 
-      <div className="mt-6 mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div className="mb-3 mt-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="hd flex items-center gap-2 text-[17px]"><Users size={17} /> Employee Level Assignment</h2>
-          <p className="mt-1 text-[11.5px] text-ink-500">Current employee hierarchy. Assignment is validated again by the backend even if the browser is modified.</p>
+          <p className="mt-1 text-[11.5px] text-ink-500">Read-only hierarchy status. Official Workforce role → department → level is fixed as one policy unit.</p>
         </div>
         <div className="relative w-full sm:max-w-sm">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
@@ -173,7 +147,6 @@ export default function AccessLevels() {
           {filtered.map((employee) => {
             const current = levelOf(employee);
             const def = levels.find((x) => x.level === current);
-            const self = String(employee.id) === String(user?.id);
             return (
               <div key={employee.id} className="card p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -186,25 +159,16 @@ export default function AccessLevels() {
                 <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
                   <div><span className="text-ink-400">Role</span><div className="mt-0.5 truncate font-medium">{roleName(employee.role_id)}</div></div>
                   <div><span className="text-ink-400">Status</span><div className="mt-0.5 font-medium">{employee.active === false ? "Disabled" : "Active"}</div></div>
-                  <div><span className="text-ink-400">Department</span><div className="mt-0.5 truncate font-medium">{employee.department || "—"}</div></div>
+                  <div><span className="text-ink-400">Department</span><div className="mt-0.5 truncate font-medium">{employee.department || "Global"}</div></div>
                   <div><span className="text-ink-400">Level scope</span><div className="mt-0.5 truncate font-medium">{def?.scope || "—"}</div></div>
                 </div>
-                <div className="mt-3 border-t border-ink-100 pt-3 dark:border-ink-800">
-                  <label className="lbl">Access level</label>
-                  <Select
-                    value={String(current)}
-                    disabled={!canEdit || self || busyId === String(employee.id)}
-                    onChange={(e) => void changeLevel(employee, Number(e.target.value) as LevelNumber)}
-                  >
-                    {levels.map((level) => <option key={level.level} value={level.level}>{level.code} — {level.name}</option>)}
-                  </Select>
-                  {self && <div className="mt-1 text-[10px] text-ink-400">Your own level is protected from self-change.</div>}
-                  {!canEdit && <div className="mt-1 text-[10px] text-ink-400">View only — employee edit permission is required.</div>}
+                <div className="mt-3 rounded-md border border-ink-100 bg-ink-50 px-2.5 py-2 text-[10.5px] text-ink-500 dark:border-ink-800 dark:bg-ink-800/50">
+                  Level is fixed by the approved role. Use Employee Management to change role/department.
                 </div>
               </div>
             );
           })}
-          {filtered.length === 0 && <div className="card col-span-full p-8 text-center text-[13px] text-ink-500">No employees match this search.</div>}
+          {filtered.length === 0 && <div className="card col-span-full p-8 text-center text-[13px] text-ink-500">No employees are visible in your current scope.</div>}
         </div>
       )}
     </div>

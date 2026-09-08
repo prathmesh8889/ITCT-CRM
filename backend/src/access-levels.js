@@ -1,19 +1,16 @@
-/**
- * Organizational access-level foundation for ITCYBER Workforce OS / CRM.
- *
- * Levels are intentionally separate from job roles. Roles still control module
- * permissions; this layer establishes the six-level organizational hierarchy
- * that department, team and intern-sandbox policies can build on safely.
+/** Organizational access-level foundation for ITCYBER Workforce OS / CRM.
+ * Approved L3-L6 Workforce roles bind one canonical department + level; legacy
+ * role inference remains only for backward-compatible accounts.
  */
 const { db } = require("./db");
 
 const ACCESS_LEVELS = Object.freeze([
   Object.freeze({ level: 1, code: "L1", name: "Super Admin / CEO", scope: "Global Control", data_visibility: "Full organization, strategic KPIs and financial visibility", summary: "Highest organizational authority and global control." }),
   Object.freeze({ level: 2, code: "L2", name: "Operational Admin / COO", scope: "Global Operations", data_visibility: "Cross-department operations, utilization, SLA and performance visibility", summary: "Runs company-wide operations below the CEO layer." }),
-  Object.freeze({ level: 3, code: "L3", name: "Department Head / HOD", scope: "Department Ownership", data_visibility: "Department-level people, budgets, hiring and performance", summary: "Owns one department and its routine decisions." }),
-  Object.freeze({ level: 4, code: "L4", name: "Team Lead", scope: "Team Workspace", data_visibility: "Assigned team, daily execution, sprint/task visibility", summary: "Owns execution for an assigned team." }),
+  Object.freeze({ level: 3, code: "L3", name: "Department Head / HOD", scope: "Department Ownership", data_visibility: "Only the assigned department and its subordinate work", summary: "Owns one department and its routine decisions." }),
+  Object.freeze({ level: 4, code: "L4", name: "Team Lead", scope: "Team Workspace", data_visibility: "Only the assigned team, daily execution and task visibility", summary: "Owns execution for an assigned team." }),
   Object.freeze({ level: 5, code: "L5", name: "Full-Time Employee", scope: "Individual Workspace", data_visibility: "Own tasks, assigned CRM records and personal KPIs", summary: "Individual execution layer." }),
-  Object.freeze({ level: 6, code: "L6", name: "Intern", scope: "Restricted / Sandbox", data_visibility: "Restricted learning workspace; masking/sandbox policies are applied in later security steps", summary: "Lowest-trust supervised learning and support layer." }),
+  Object.freeze({ level: 6, code: "L6", name: "Intern", scope: "Restricted / Sandbox", data_visibility: "Restricted task workspace with masked PII and bulk export blocked", summary: "Lowest-trust supervised learning and support layer." }),
 ]);
 
 const isValidAccessLevel = (value) => {
@@ -28,9 +25,6 @@ function inferAccessLevelFromRole(roleName) {
   if (name.includes("intern")) return 6;
   if (name.includes("team lead") || name.includes("team leader")) return 4;
   if (name.includes("manager") || name.includes("department head") || name.includes("hod")) return 3;
-  // Ambiguous titles (for example "Security Lead") default to L5 until an
-  // administrator explicitly assigns the correct level. This is safer than
-  // accidentally granting a broader level from a title guess.
   return 5;
 }
 
@@ -62,9 +56,6 @@ function ensureAccessLevelSchema() {
   if (!ready) {
     ready = (async () => {
       await db.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS access_level SMALLINT");
-
-      // Backfill only missing/invalid values. Known legacy system roles receive
-      // deterministic levels; custom/ambiguous roles default to least-privilege L5.
       await db.query(`
         UPDATE users u
            SET access_level = CASE
@@ -80,9 +71,6 @@ function ensureAccessLevelSchema() {
            AND (u.access_level IS NULL OR u.access_level NOT BETWEEN 1 AND 6)
       `);
       await db.query("UPDATE users SET access_level = 5 WHERE access_level IS NULL OR access_level NOT BETWEEN 1 AND 6");
-
-      // Existing system-role accounts must never drift below their intended
-      // organizational level during migration.
       await db.query(`
         UPDATE users u SET access_level = 1
           FROM roles r
@@ -93,7 +81,6 @@ function ensureAccessLevelSchema() {
           FROM roles r
          WHERE u.role_id = r.id AND lower(trim(r.name)) = 'admin' AND u.access_level <> 2
       `);
-
       await db.query(`
         ALTER TABLE users ALTER COLUMN access_level SET DEFAULT 5;
         ALTER TABLE users ALTER COLUMN access_level SET NOT NULL

@@ -12,6 +12,7 @@ const { ensureAuthSchema } = require("./auth-schema");
 const { ensureAccessLevelSchema } = require("./access-levels");
 const { ensureOrganizationSchema } = require("./organization-schema");
 const { ensureWorkforceRoleSchema } = require("./workforce-role-schema");
+const { internSanitizer } = require("./intern-sanitizer");
 const { router: crmRoutes, startDiscoveryWorker } = require("./routes/crm");
 
 const app = express();
@@ -38,7 +39,13 @@ app.get("/api/health", async (_req, res) => {
   }
 });
 
+// Wrap JSON first. Authenticated L6 routes set req.accessLevel later and the
+// response is sanitized when res.json finally executes.
+app.use("/api", internSanitizer);
 app.use("/api/auth", require("./routes/auth"));
+
+// Row-level scoped views/guards must run before the legacy CRM router.
+app.use("/api", require("./routes/scoped-crm"));
 app.use("/api", crmRoutes);
 app.use("/api", require("./routes/billing"));
 app.use("/api", require("./routes/dashboard"));
@@ -46,12 +53,13 @@ app.use("/api", require("./routes/access-levels"));
 app.use("/api", require("./routes/calendar-view"));
 app.use("/api", require("./routes/company-settings"));
 
-// Step 3 Workforce OS: exact role catalog, read-enriched departments and
-// atomic user role/department updates take precedence over legacy admin routes.
+// Workforce OS source-of-truth routes take precedence over legacy admin routes.
 app.use("/api", require("./routes/workforce-roles"));
 app.use("/api", require("./routes/department-catalog-view"));
+app.use("/api", require("./routes/department-directory"));
 app.use("/api", require("./routes/user-workforce"));
 app.use("/api", require("./routes/department-members"));
+app.use("/api", require("./routes/department-admin-guard"));
 app.use("/api", require("./routes/organization"));
 app.use("/api", require("./routes/user-create"));
 app.use("/api", require("./routes/user-security"));
