@@ -22,6 +22,7 @@ import Invoices from "./pages/Invoices";
 import Products from "./pages/Products";
 import Reports from "./pages/Reports";
 import EmployeeManagement from "./pages/EmployeeManagement";
+import TeamsPage from "./pages/Teams";
 import Departments from "./pages/DepartmentsV3";
 import AccessLevels from "./pages/AccessLevels";
 import { AutomationPage, AuditPage } from "./pages/Admin";
@@ -72,6 +73,7 @@ function Root() {
       <Route path="/reports" element={<Guard mod="reports"><Reports/></Guard>}/>
       <Route path="/assistant" element={<Navigate to="/dashboard" replace />} />
       <Route path="/employees" element={<Guard mod="employees"><EmployeeManagement/></Guard>}/>
+      <Route path="/teams" element={<Guard mod="teams"><TeamsPage/></Guard>}/>
       <Route path="/access-levels" element={<Guard mod="employees"><AccessLevels/></Guard>}/>
       <Route path="/departments" element={<Guard mod="employees"><Departments/></Guard>}/>
       <Route path="/access-settings" element={<Navigate to="/departments" replace />} />
