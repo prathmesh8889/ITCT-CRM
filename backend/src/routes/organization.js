@@ -1,4 +1,4 @@
-/** Departments, department-role policy, calendar event/holiday CRUD and self-profile editing. */
+/** Departments, department assignment policy, calendar CRUD and self-profile editing. */
 const express = require("express");
 const { db } = require("../db");
 const { HttpError } = require("../core");
@@ -48,24 +48,31 @@ async function validateDepartmentAssignment(req, _res, next) {
     if (SUPER_ROLES.has(role.name)) return next();
 
     const department = await db.one(
-      "SELECT * FROM departments WHERE lower(name) = lower($1)",
+      "SELECT * FROM departments WHERE lower(trim(name)) = lower(trim($1))",
       [departmentName],
     );
     if (!department) throw new HttpError(422, "Select a valid department before assigning this role");
     if (!department.active) throw new HttpError(422, "The selected department is disabled");
-    const allowed = Array.isArray(department.allowed_role_ids) ? department.allowed_role_ids.map(Number) : [];
+
+    // Step 2 deliberately clears old role restrictions from the approved
+    // Workforce OS departments. Exact department-role matrices are introduced
+    // in Step 3; custom/legacy departments keep their old restrictions for
+    // backward compatibility until then.
+    const allowed = department.system
+      ? []
+      : (Array.isArray(department.allowed_role_ids) ? department.allowed_role_ids.map(Number) : []);
     if (allowed.length && !allowed.includes(roleId))
       throw new HttpError(422, `${role.name} is not allowed in the ${department.name} department`);
+
     req.body.department = department.name;
     next();
   } catch (e) { next(e); }
 }
 
-// Validate department/role combinations before the existing employee create/update handlers run.
 router.post("/users", requireAuth, validateDepartmentAssignment, (_req, _res, next) => next());
 router.patch("/users/:id", requireAuth, validateDepartmentAssignment, (_req, _res, next) => next());
 
-// AI Assistant has been removed from the CRM surface and API.
+// AI Assistant remains retired from the supported CRM API surface.
 router.use("/ai", (_req, res) => res.status(404).json({ detail: "Not Found" }));
 
 // ================= DEPARTMENTS =================
@@ -74,9 +81,12 @@ router.get("/departments", requirePerm("employees", "view"), async (_req, res, n
     await ensureOrganizationSchema();
     const rows = await db.all(`
       SELECT d.*,
-        (SELECT COUNT(*)::int FROM users u WHERE u.deleted_at IS NULL AND lower(trim(u.department)) = lower(trim(d.name))) AS member_count
-      FROM departments d
-      ORDER BY d.active DESC, d.name ASC
+        (SELECT COUNT(*)::int
+           FROM users u
+          WHERE u.deleted_at IS NULL
+            AND lower(trim(COALESCE(u.department,''))) = lower(trim(d.name))) AS member_count
+        FROM departments d
+       ORDER BY d.system DESC, d.sort_order ASC, d.active DESC, d.name ASC
     `);
     res.json(rows);
   } catch (e) { next(e); }
@@ -88,15 +98,20 @@ router.post("/departments", requirePerm("employees", "create"), async (req, res,
     const b = req.body || {};
     const name = String(b.name || "").trim();
     if (!name) throw new HttpError(422, "Department name is required");
-    if (await db.one("SELECT id FROM departments WHERE lower(name) = lower($1)", [name]))
+    if (await db.one("SELECT id FROM departments WHERE lower(trim(name)) = lower(trim($1))", [name]))
       throw new HttpError(409, "A department with this name already exists");
+
+    // Custom departments remain supported, but source-defined Workforce OS
+    // departments are created only by the catalog migration.
     const allowed = await normalizedRoleIds(b.allowed_role_ids ?? []);
     const r = await db.query(
-      `INSERT INTO departments (name, description, allowed_role_ids, active)
-       VALUES ($1,$2,$3,$4) RETURNING *`,
+      `INSERT INTO departments
+         (name, description, allowed_role_ids, active, system_key, system, sort_order)
+       VALUES ($1,$2,$3,$4,NULL,FALSE,1000)
+       RETURNING *`,
       [name, String(b.description || "").trim(), JSON.stringify(allowed), b.active !== false],
     );
-    await audit(req.user, "Department Created", `department:${name}`, `${allowed.length} role restriction(s)`);
+    await audit(req.user, "Department Created", `department:${name}`, "Custom department");
     res.status(201).json({ ...r.rows[0], member_count: 0 });
   } catch (e) { next(e); }
 });
@@ -107,32 +122,42 @@ router.patch("/departments/:id", requirePerm("employees", "edit"), async (req, r
     const id = Number(req.params.id);
     const current = await db.one("SELECT * FROM departments WHERE id = $1", [id]);
     if (!current) throw new HttpError(404, "Department not found");
+    if (current.system)
+      throw new HttpError(409, "Workforce OS system department details are locked to the approved specification");
+
     const b = req.body || {};
     const name = b.name !== undefined ? String(b.name).trim() : current.name;
     if (!name) throw new HttpError(422, "Department name is required");
-    const dupe = await db.one("SELECT id FROM departments WHERE lower(name) = lower($1) AND id <> $2", [name, id]);
+    const dupe = await db.one("SELECT id FROM departments WHERE lower(trim(name)) = lower(trim($1)) AND id <> $2", [name, id]);
     if (dupe) throw new HttpError(409, "A department with this name already exists");
+
     const allowed = b.allowed_role_ids !== undefined ? await normalizedRoleIds(b.allowed_role_ids) : current.allowed_role_ids;
     const description = b.description !== undefined ? String(b.description).trim() : current.description;
     const active = b.active !== undefined ? !!b.active : current.active;
 
-    await db.tx(async (c) => {
-      await c.query(
-        `UPDATE departments SET name=$1, description=$2, allowed_role_ids=$3, active=$4, updated_at=now() WHERE id=$5`,
+    await db.tx(async (client) => {
+      await client.query(
+        `UPDATE departments
+            SET name=$1, description=$2, allowed_role_ids=$3, active=$4, updated_at=now()
+          WHERE id=$5`,
         [name, description, JSON.stringify(allowed || []), active, id],
       );
       if (name !== current.name) {
-        await c.query(
-          "UPDATE users SET department = $1 WHERE deleted_at IS NULL AND lower(trim(department)) = lower(trim($2))",
+        await client.query(
+          "UPDATE users SET department = $1 WHERE deleted_at IS NULL AND lower(trim(COALESCE(department,''))) = lower(trim($2))",
           [name, current.name],
         );
       }
     });
-    await audit(req.user, "Department Updated", `department:${name}`, `${(allowed || []).length} allowed role(s)`);
+
+    await audit(req.user, "Department Updated", `department:${name}`, "Custom/legacy department metadata");
     const row = await db.one(`
       SELECT d.*,
-        (SELECT COUNT(*)::int FROM users u WHERE u.deleted_at IS NULL AND lower(trim(u.department)) = lower(trim(d.name))) AS member_count
-      FROM departments d WHERE d.id = $1`, [id]);
+        (SELECT COUNT(*)::int
+           FROM users u
+          WHERE u.deleted_at IS NULL
+            AND lower(trim(COALESCE(u.department,''))) = lower(trim(d.name))) AS member_count
+        FROM departments d WHERE d.id = $1`, [id]);
     res.json(row);
   } catch (e) { next(e); }
 });
@@ -143,8 +168,11 @@ router.delete("/departments/:id", requirePerm("employees", "delete"), async (req
     const id = Number(req.params.id);
     const current = await db.one("SELECT * FROM departments WHERE id = $1", [id]);
     if (!current) throw new HttpError(404, "Department not found");
+    if (current.system)
+      throw new HttpError(409, "Approved Workforce OS departments cannot be deleted");
+
     const members = await db.one(
-      "SELECT COUNT(*)::int AS n FROM users WHERE deleted_at IS NULL AND lower(trim(department)) = lower(trim($1))",
+      "SELECT COUNT(*)::int AS n FROM users WHERE deleted_at IS NULL AND lower(trim(COALESCE(department,''))) = lower(trim($1))",
       [current.name],
     );
     if (members?.n) throw new HttpError(409, "Move employees out of this department before deleting it");
@@ -185,8 +213,9 @@ router.get("/calendar/events", requirePerm("calendar", "view"), async (req, res,
     const rows = await db.all(
       `SELECT id, title, kind, event_date::text AS date, start_time, end_time, all_day,
               location, description, created_by, created_at, updated_at
-       FROM calendar_events WHERE event_date BETWEEN $1 AND $2
-       ORDER BY event_date, all_day DESC, start_time, title`,
+         FROM calendar_events
+        WHERE event_date BETWEEN $1 AND $2
+        ORDER BY event_date, all_day DESC, start_time, title`,
       [from, to],
     );
     res.json(rows);
@@ -222,7 +251,8 @@ router.post("/calendar/events", requirePerm("calendar", "create"), async (req, r
     await ensureOrganizationSchema();
     const p = calendarPayload(req.body);
     const r = await db.query(
-      `INSERT INTO calendar_events (title, kind, event_date, start_time, end_time, all_day, location, description, created_by)
+      `INSERT INTO calendar_events
+         (title, kind, event_date, start_time, end_time, all_day, location, description, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        RETURNING id, title, kind, event_date::text AS date, start_time, end_time, all_day, location, description, created_by, created_at, updated_at`,
       [p.title, p.kind, p.date, p.start_time, p.end_time, p.all_day, p.location, p.description, req.user.id],
@@ -238,12 +268,14 @@ router.patch("/calendar/events/:id", requirePerm("calendar", "edit"), async (req
     const id = Number(req.params.id);
     const current = await db.one(
       `SELECT id, title, kind, event_date::text AS date, start_time, end_time, all_day, location, description
-       FROM calendar_events WHERE id = $1`, [id]);
+         FROM calendar_events WHERE id = $1`, [id]);
     if (!current) throw new HttpError(404, "Calendar entry not found");
     const p = calendarPayload(req.body, current);
     const r = await db.query(
-      `UPDATE calendar_events SET title=$1, kind=$2, event_date=$3, start_time=$4, end_time=$5,
-         all_day=$6, location=$7, description=$8, updated_at=now() WHERE id=$9
+      `UPDATE calendar_events
+          SET title=$1, kind=$2, event_date=$3, start_time=$4, end_time=$5,
+              all_day=$6, location=$7, description=$8, updated_at=now()
+        WHERE id=$9
        RETURNING id, title, kind, event_date::text AS date, start_time, end_time, all_day, location, description, created_by, created_at, updated_at`,
       [p.title, p.kind, p.date, p.start_time, p.end_time, p.all_day, p.location, p.description, id],
     );

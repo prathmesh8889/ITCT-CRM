@@ -14,11 +14,11 @@ const audit = (user, action, target, detail = "") =>
 
 const employeeSelect = `
   SELECT u.id, u.name, u.email, u.phone, u.department, u.designation,
-         u.role_id, u.team_id, u.active, u.color, u.last_login_at,
+         u.role_id, u.team_id, u.access_level, u.active, u.color, u.last_login_at,
          r.name AS role_name, t.name AS team_name
-  FROM users u
-  LEFT JOIN roles r ON r.id = u.role_id
-  LEFT JOIN teams t ON t.id = u.team_id`;
+    FROM users u
+    LEFT JOIN roles r ON r.id = u.role_id
+    LEFT JOIN teams t ON t.id = u.team_id`;
 
 async function getDepartment(id) {
   await ensureOrganizationSchema();
@@ -35,7 +35,7 @@ router.get("/departments/:id/employees", requirePerm("employees", "view"), async
       `${employeeSelect}
        WHERE u.deleted_at IS NULL
          AND lower(trim(COALESCE(u.department, ''))) = lower(trim($1))
-       ORDER BY u.active DESC, u.name ASC`,
+       ORDER BY u.active DESC, u.access_level ASC, u.name ASC`,
       [department.name],
     );
     res.json(rows);
@@ -49,7 +49,7 @@ router.get("/departments/:id/candidates", requirePerm("employees", "view"), asyn
       `${employeeSelect}
        WHERE u.deleted_at IS NULL
          AND lower(trim(COALESCE(u.department, ''))) <> lower(trim($1))
-       ORDER BY (trim(COALESCE(u.department, '')) = '') DESC, u.active DESC, u.name ASC`,
+       ORDER BY (trim(COALESCE(u.department, '')) = '') DESC, u.active DESC, u.access_level ASC, u.name ASC`,
       [department.name],
     );
     res.json(rows);
@@ -65,15 +65,19 @@ router.post("/departments/:id/employees", requirePerm("employees", "edit"), asyn
     if (!Number.isInteger(userId) || userId <= 0) throw new HttpError(422, "Select a valid employee");
     const employee = await db.one(
       `SELECT u.*, r.name AS role_name
-       FROM users u LEFT JOIN roles r ON r.id = u.role_id
-       WHERE u.id = $1 AND u.deleted_at IS NULL`,
+         FROM users u
+         LEFT JOIN roles r ON r.id = u.role_id
+        WHERE u.id = $1 AND u.deleted_at IS NULL`,
       [userId],
     );
     if (!employee) throw new HttpError(404, "Employee not found");
 
-    const allowed = Array.isArray(department.allowed_role_ids)
-      ? department.allowed_role_ids.map(Number)
-      : [];
+    // Approved Step-2 system departments intentionally do not enforce the old
+    // role lists; the exact role matrix is introduced in Step 3. Custom/legacy
+    // departments retain old restrictions for backward compatibility.
+    const allowed = department.system
+      ? []
+      : (Array.isArray(department.allowed_role_ids) ? department.allowed_role_ids.map(Number) : []);
     if (
       allowed.length &&
       !allowed.includes(Number(employee.role_id)) &&
@@ -103,7 +107,7 @@ router.delete("/departments/:id/employees/:userId", requirePerm("employees", "ed
 
     const employee = await db.one(
       `SELECT id, name, email, department FROM users
-       WHERE id = $1 AND deleted_at IS NULL`,
+        WHERE id = $1 AND deleted_at IS NULL`,
       [userId],
     );
     if (!employee) throw new HttpError(404, "Employee not found");
