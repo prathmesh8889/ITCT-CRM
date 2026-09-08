@@ -1,7 +1,7 @@
 {
   "name": "itct-crm-backend",
   "version": "2.0.0",
-  "description": "ITCT CRM API — Node.js + Express + PostgreSQL (JWT auth, RBAC, departments, Workforce roles, calendar and automation)",
+  "description": "ITCT CRM API — Node.js + Express + PostgreSQL (JWT auth, Workforce RBAC, department services, project scope, calendar and automation)",
   "main": "src/server.js",
   "license": "UNLICENSED",
   "private": true,
@@ -10,7 +10,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "seed": "node src/seed.js",
-    "test": "node --test tests/api.test.js tests/employee-security.test.js tests/organization.test.js tests/ui-regression.test.js tests/access-levels.test.js tests/departments-catalog.test.js tests/workforce-roles.test.js"
+    "test": "node --test tests/api.test.js tests/employee-security.test.js tests/organization.test.js tests/ui-regression.test.js tests/access-levels.test.js tests/departments-catalog.test.js tests/workforce-roles.test.js tests/workforce-permissions.test.js tests/department-workspace.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

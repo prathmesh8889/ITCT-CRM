@@ -1,14 +1,14 @@
-/** Step 3 employee update enforcement: role, department and L1-L6 level stay consistent. */
+/** Workforce employee update enforcement: role, department and L1-L6 level stay consistent. */
 const express = require("express");
 const { db } = require("../db");
 const { HttpError } = require("../core");
 const { requirePerm } = require("../security");
 const { effectiveAccessLevel, canManageAccessLevel } = require("../access-levels");
+const { canManageTarget, isGlobalAdmin, norm } = require("../workforce-scope");
 const { ensureWorkforceRoleSchema } = require("../workforce-role-schema");
 
 const router = express.Router();
 const safeUser = (u) => { const { password_hash, ...rest } = u; return rest; };
-const norm = (v) => String(v || "").trim().toLowerCase();
 
 router.patch("/users/:id", requirePerm("employees", "edit"), async (req, res, next) => {
   try {
@@ -24,6 +24,8 @@ router.patch("/users/:id", requirePerm("employees", "edit"), async (req, res, ne
        WHERE u.id = $1 AND u.deleted_at IS NULL
     `, [id]);
     if (!target) throw new HttpError(404, "Employee not found");
+    if (!canManageTarget(req, target))
+      throw new HttpError(403, "You can edit only employees inside your Workforce OS scope");
 
     const b = req.body || {};
     const roleTouched = b.role_id !== undefined && Number(b.role_id) !== Number(target.role_id);
@@ -45,6 +47,8 @@ router.patch("/users/:id", requirePerm("employees", "edit"), async (req, res, ne
         throw new HttpError(422, "This legacy role is retired. Select an approved Workforce OS role");
 
       if (selectedRole.workforce_role) {
+        if (!isGlobalAdmin(req) && selectedRole.department_key !== req.role.department_key)
+          throw new HttpError(403, "You can assign roles only from your own department");
         const dept = await db.one(
           "SELECT id, name, system_key, active FROM departments WHERE system = TRUE AND system_key = $1",
           [selectedRole.department_key],
@@ -57,6 +61,7 @@ router.patch("/users/:id", requirePerm("employees", "edit"), async (req, res, ne
         designation = selectedRole.name;
         isSales = selectedRole.department_key === "sales-business-development";
       } else if (["Super Admin", "Admin"].includes(selectedRole.name)) {
+        if (!isGlobalAdmin(req)) throw new HttpError(403, "Only Super Admin/Admin can assign global administrator roles");
         canonicalDepartment = "";
         nextLevel = selectedRole.name === "Super Admin" ? 1 : 2;
         designation = selectedRole.name;
@@ -76,6 +81,8 @@ router.patch("/users/:id", requirePerm("employees", "edit"), async (req, res, ne
       }
       nextLevel = Number(target.role_access_level || target.access_level);
     } else if (b.department !== undefined) {
+      if (!isGlobalAdmin(req) && norm(b.department) !== norm(req.user.department))
+        throw new HttpError(403, "You can edit only your assigned department");
       canonicalDepartment = String(b.department || "").trim();
     }
 
@@ -97,6 +104,8 @@ router.patch("/users/:id", requirePerm("employees", "edit"), async (req, res, ne
       throw new HttpError(409, "Email already exists");
     if (teamId != null && !await db.one("SELECT id FROM teams WHERE id = $1", [teamId]))
       throw new HttpError(422, "Selected team no longer exists");
+    if (!isGlobalAdmin(req) && Number(req.accessLevel) === 4 && teamId !== Number(req.user.team_id))
+      throw new HttpError(403, "Team Lead can manage only their own team");
 
     const roleId = b.role_id !== undefined ? Number(b.role_id) : target.role_id;
     const updated = await db.one(`

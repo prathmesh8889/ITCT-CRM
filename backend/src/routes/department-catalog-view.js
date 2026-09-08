@@ -1,14 +1,22 @@
-/** Enriched department GET: approved Step-3 roles are returned with each system department. */
+/** Enriched department GET with strict Workforce OS department visibility. */
 const express = require("express");
 const { db } = require("../db");
 const { requirePerm } = require("../security");
+const { isGlobalAdmin } = require("../workforce-scope");
 const { ensureWorkforceRoleSchema } = require("../workforce-role-schema");
 
 const router = express.Router();
 
-router.get("/departments", requirePerm("employees", "view"), async (_req, res, next) => {
+router.get("/departments", requirePerm("employees", "view"), async (req, res, next) => {
   try {
     await ensureWorkforceRoleSchema();
+    const params = [];
+    let where = "";
+    if (!isGlobalAdmin(req)) {
+      if (!String(req.user.department || "").trim()) return res.json([]);
+      params.push(req.user.department);
+      where = "WHERE lower(trim(d.name)) = lower(trim($1))";
+    }
     const rows = await db.all(`
       SELECT d.*,
         (SELECT COUNT(*)::int FROM users u
@@ -27,8 +35,9 @@ router.get("/departments", requirePerm("employees", "view"), async (_req, res, n
           WHERE r.workforce_role = TRUE AND r.department_key = d.system_key
         ), '[]'::jsonb) ELSE '[]'::jsonb END AS workforce_roles
       FROM departments d
+      ${where}
       ORDER BY d.system DESC, d.sort_order ASC, d.active DESC, d.name ASC
-    `);
+    `, params);
     res.json(rows);
   } catch (e) { next(e); }
 });

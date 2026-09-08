@@ -1,6 +1,5 @@
 /**
- * Auth + RBAC + record ownership. Backend is the enforcement authority —
- * the frontend only hides what the API would refuse anyway.
+ * Auth + RBAC + Workforce OS record scope. Backend is the enforcement authority.
  */
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
@@ -8,6 +7,7 @@ const crypto = require("crypto");
 const { config, HttpError, sha256 } = require("./core");
 const { db } = require("./db");
 const { ensureAccessLevelSchema, effectiveAccessLevel, isValidAccessLevel } = require("./access-levels");
+const { scopedUserIds } = require("./workforce-scope");
 
 const hashPassword = (plain) => bcrypt.hashSync(plain, 10);
 const verifyPassword = (plain, hash) => { try { return bcrypt.compareSync(plain, hash); } catch { return false; } };
@@ -42,7 +42,6 @@ async function enforceDepartmentRole(user, role) {
       "SELECT id, name, active, allowed_role_ids FROM departments WHERE lower(name) = lower($1)",
       [String(user.department).trim()],
     );
-    // Legacy departments remain usable until an admin creates/configures them.
     if (!department) return null;
     if (!department.active) throw new HttpError(403, "Your department is disabled");
     const allowed = Array.isArray(department.allowed_role_ids) ? department.allowed_role_ids.map(Number) : [];
@@ -50,7 +49,6 @@ async function enforceDepartmentRole(user, role) {
       throw new HttpError(403, `Your role is not enabled for the ${department.name} department`);
     return department;
   } catch (e) {
-    // Unit tests and pre-migration environments may load auth before the organization schema exists.
     if (e?.code === "42P01") return null;
     throw e;
   }
@@ -66,9 +64,6 @@ async function requireAuth(req, _res, next) {
     try { payload = jwt.verify(token, config.jwtSecret); } catch { throw new HttpError(401, "Invalid or expired token"); }
     if (payload.type !== "access") throw new HttpError(401, "Invalid token type");
 
-    // Access-level schema is idempotent and cached. Running it here also keeps
-    // auth safe in environments where the Express app is imported without the
-    // normal server boot sequence.
     await ensureAccessLevelSchema();
     const user = await db.one("SELECT * FROM users WHERE id = $1", [Number(payload.sub)]);
     if (!user || !user.active || user.deleted_at) throw new HttpError(401, "Account is disabled");
@@ -78,8 +73,6 @@ async function requireAuth(req, _res, next) {
     if (!isValidAccessLevel(accessLevel)) throw new HttpError(403, "Access level is not configured");
     const department = await enforceDepartmentRole(user, role);
 
-    // A temporary/reset password can authenticate only to auth endpoints needed
-    // to inspect the session, change the password, or sign out. CRM data stays locked.
     if (user.must_change_password) {
       const allowed = req.baseUrl === "/api/auth" && ["/me", "/change-password", "/logout"].includes(req.path);
       if (!allowed) throw new HttpError(403, "Password change required before accessing CRM data");
@@ -101,10 +94,14 @@ function requirePerm(module, perm) {
   }];
 }
 
-// ---------------- ownership ----------------
-const isWide = (role) => SUPER_ROLES.has(role.name) || role.name === "Sales Manager";
+// ---------------- ownership / organizational scope ----------------
+// Only L1/L2 are globally wide. Department Heads are wide only inside their
+// own department and Team Leads only inside their own team; ensureRow applies
+// that scope through scopedUserIds().
+const isWide = (role) => SUPER_ROLES.has(role.name);
 
-/** Sales Executive sees only own records; managers/admins see all. */
+/** Legacy list helpers still use this for self-scoped routes. Step-4 read
+ * routers add department/team list scope where needed. */
 const applyOwnership = (req, column) =>
   isWide(req.role) ? { sql: "", params: [] } : { sql: ` AND ${column} = $`, params: [req.user.id] };
 
@@ -112,8 +109,12 @@ async function ensureRow(req, table, id, ownerColumn) {
   const row = await db.one(`SELECT * FROM ${table} WHERE id = $1`, [id]);
   const gone = !row || row.deleted_at;
   if (gone) throw new HttpError(404, "Record not found");
-  if (!isWide(req.role) && ownerColumn && row[ownerColumn] !== req.user.id)
-    throw new HttpError(403, "You do not own this record");
+  if (!ownerColumn || isWide(req.role)) return row;
+
+  const ownerId = Number(row[ownerColumn]);
+  const visibleIds = await scopedUserIds(req);
+  if (!Number.isInteger(ownerId) || !visibleIds?.includes(ownerId))
+    throw new HttpError(403, "This record is outside your Workforce OS scope");
   return row;
 }
 const ensureLead = (req, id) => ensureRow(req, "leads", id, "assigned_user_id");

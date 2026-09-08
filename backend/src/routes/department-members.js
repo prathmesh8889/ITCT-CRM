@@ -1,8 +1,9 @@
-/** Department membership management with Step-3 role/department consistency. */
+/** Department membership management with strict department visibility. */
 const express = require("express");
 const { db } = require("../db");
 const { HttpError } = require("../core");
 const { requirePerm } = require("../security");
+const { isGlobalAdmin, assertDepartment, norm } = require("../workforce-scope");
 const { ensureWorkforceRoleSchema } = require("../workforce-role-schema");
 
 const router = express.Router();
@@ -24,31 +25,38 @@ const employeeSelect = `
   LEFT JOIN departments rd ON rd.system_key = r.department_key AND rd.system = TRUE
   LEFT JOIN teams t ON t.id = u.team_id`;
 
-async function getDepartment(id) {
+async function getDepartment(req, id) {
   await ensureWorkforceRoleSchema();
   if (!Number.isInteger(id) || id <= 0) throw new HttpError(422, "Invalid department id");
   const department = await db.one("SELECT * FROM departments WHERE id = $1", [id]);
   if (!department) throw new HttpError(404, "Department not found");
+  assertDepartment(req, department.name);
   return department;
 }
 
 router.get("/departments/:id/employees", requirePerm("employees", "view"), async (req, res, next) => {
   try {
-    const department = await getDepartment(Number(req.params.id));
-    const rows = await db.all(
+    const department = await getDepartment(req, Number(req.params.id));
+    let rows = await db.all(
       `${employeeSelect}
        WHERE u.deleted_at IS NULL
          AND lower(trim(COALESCE(u.department, ''))) = lower(trim($1))
        ORDER BY u.active DESC, u.access_level, u.name ASC`,
       [department.name],
     );
+    if (!isGlobalAdmin(req) && Number(req.accessLevel) === 4) {
+      rows = req.user.team_id ? rows.filter((x) => Number(x.team_id) === Number(req.user.team_id)) : rows.filter((x) => Number(x.id) === Number(req.user.id));
+    }
     res.json(rows);
   } catch (e) { next(e); }
 });
 
 router.get("/departments/:id/candidates", requirePerm("employees", "view"), async (req, res, next) => {
   try {
-    const department = await getDepartment(Number(req.params.id));
+    const department = await getDepartment(req, Number(req.params.id));
+    // Moving people across departments is a global-admin operation. HOD/TL users
+    // can manage only members already inside their own scope.
+    if (!isGlobalAdmin(req)) return res.json([]);
     const rows = await db.all(
       `${employeeSelect}
        WHERE u.deleted_at IS NULL
@@ -74,7 +82,7 @@ router.get("/departments/:id/candidates", requirePerm("employees", "view"), asyn
 
 router.post("/departments/:id/employees", requirePerm("employees", "edit"), async (req, res, next) => {
   try {
-    const department = await getDepartment(Number(req.params.id));
+    const department = await getDepartment(req, Number(req.params.id));
     if (!department.active) throw new HttpError(422, "Enable this department before adding employees");
 
     const userId = Number(req.body?.user_id);
@@ -90,6 +98,8 @@ router.post("/departments/:id/employees", requirePerm("employees", "edit"), asyn
       [userId],
     );
     if (!employee) throw new HttpError(404, "Employee not found");
+    if (!isGlobalAdmin(req) && norm(employee.department) !== norm(department.name))
+      throw new HttpError(403, "Only Super Admin/Admin can move employees between departments");
 
     if (department.system) {
       if (!employee.workforce_role)
@@ -118,19 +128,21 @@ router.post("/departments/:id/employees", requirePerm("employees", "edit"), asyn
 
 router.delete("/departments/:id/employees/:userId", requirePerm("employees", "edit"), async (req, res, next) => {
   try {
-    const department = await getDepartment(Number(req.params.id));
+    const department = await getDepartment(req, Number(req.params.id));
     const userId = Number(req.params.userId);
     if (!Number.isInteger(userId) || userId <= 0) throw new HttpError(422, "Invalid employee id");
 
     const employee = await db.one(
-      `SELECT u.id, u.name, u.email, u.department, r.name AS role_name, r.workforce_role
+      `SELECT u.id, u.name, u.email, u.department, u.team_id, r.name AS role_name, r.workforce_role
          FROM users u LEFT JOIN roles r ON r.id = u.role_id
         WHERE u.id = $1 AND u.deleted_at IS NULL`,
       [userId],
     );
     if (!employee) throw new HttpError(404, "Employee not found");
-    if (String(employee.department || "").trim().toLowerCase() !== department.name.trim().toLowerCase())
+    if (norm(employee.department) !== norm(department.name))
       throw new HttpError(409, "Employee is not assigned to this department");
+    if (!isGlobalAdmin(req) && Number(req.accessLevel) === 4 && Number(employee.team_id) !== Number(req.user.team_id))
+      throw new HttpError(403, "Team Lead can change only their own team members");
     if (department.system && employee.workforce_role)
       throw new HttpError(422, `${employee.role_name} requires an approved department. Change the employee role/department together from Employee Management`);
 
