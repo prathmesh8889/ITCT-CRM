@@ -51,6 +51,7 @@ app.use("/api/auth", require("./routes/auth"));
 
 // PDF-defined department services and project/intern workspaces are resolved
 // before the legacy CRM so every request is department + level verified.
+app.use("/api", require("./routes/department-overview"));
 app.use("/api", require("./routes/department-workspace"));
 app.use("/api", require("./routes/scoped-crm"));
 app.use("/api", crmRoutes);
