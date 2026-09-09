@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BriefcaseBusiness, CalendarDays, ListChecks, RefreshCw, Users } from "lucide-react";
+import { Briefcase, CalendarDays, ListChecks, RefreshCw, Users } from "lucide-react";
 import { api } from "../lib/api";
 import { useStore } from "../store";
 import { Badge, Btn } from "./ui";
@@ -85,7 +85,7 @@ export default function DepartmentTeamWorkPanel() {
           {data.employees.map((employee) => <article key={employee.id} className="rounded-xl border border-ink-100 bg-surface p-3.5 dark:border-ink-800 dark:bg-ink-900">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0"><div className="flex flex-wrap items-center gap-1.5"><strong className="truncate text-[13.5px]">{employee.name}</strong><Badge tone="amber">L{employee.access_level}</Badge></div><div className="mt-1 text-[11px] font-semibold text-ink-600 dark:text-ink-300">{employee.role_name}</div>{employee.team_name && <div className="mt-0.5 text-[10.5px] text-ink-400">Team: {employee.team_name}</div>}{employee.reporting_manager_name && <div className="mt-0.5 text-[10.5px] text-ink-400">Reports to: {employee.reporting_manager_name}</div>}</div>
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300"><BriefcaseBusiness size={15}/></span>
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300"><Briefcase size={15}/></span>
             </div>
 
             {employee.primary_function && <div className="mt-3 rounded-lg bg-ink-50 p-2.5 text-[10.5px] leading-relaxed text-ink-500 dark:bg-ink-800/50">{employee.primary_function}</div>}
