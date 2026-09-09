@@ -10,7 +10,8 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "seed": "node src/seed.js",
-    "test": "node --test tests/api.test.js tests/employee-security.test.js tests/organization.test.js tests/ui-regression.test.js tests/access-levels.test.js tests/departments-catalog.test.js tests/workforce-roles.test.js tests/workforce-permissions.test.js tests/department-workspace.test.js"
+    "demo:seed": "node src/demo-workforce-seed.js",
+    "test": "node --test tests/api.test.js tests/employee-security.test.js tests/organization.test.js tests/ui-regression.test.js tests/access-levels.test.js tests/departments-catalog.test.js tests/workforce-roles.test.js tests/workforce-permissions.test.js tests/department-workspace.test.js tests/demo-workforce.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

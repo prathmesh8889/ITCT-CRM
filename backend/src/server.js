@@ -5,6 +5,7 @@ const { db, initSchema } = require("./db");
 const { config, HttpError } = require("./core");
 const { sweepOverdueInvoices } = require("./engines");
 const { cleanupDemoData } = require("./cleanup-demo");
+const { seedDemoWorkforce } = require("./demo-workforce-seed");
 const { ensureAuthSchema } = require("./auth-schema");
 const { ensureAccessLevelSchema } = require("./access-levels");
 const { ensureOrganizationSchema } = require("./organization-schema");
@@ -31,7 +32,14 @@ app.get("/api/health", async (_req, res) => {
   try {
     await db.query("SELECT 1");
     const cleanup = await db.one("SELECT value FROM crm_settings WHERE key = 'demo_cleanup_v1'");
-    res.json({ status: "ok", database: "connected", version: config.version, demo_data: cleanup ? "clean" : "pending_cleanup" });
+    const workforceDemo = await db.one("SELECT value FROM crm_settings WHERE key = 'workforce_demo_v1'");
+    res.json({
+      status: "ok",
+      database: "connected",
+      version: config.version,
+      demo_data: cleanup ? "clean" : "pending_cleanup",
+      workforce_demo: workforceDemo?.value || null,
+    });
   } catch (e) {
     console.error("[health] database check failed:", e.message);
     res.status(503).json({ status: "degraded", database: "disconnected", version: config.version });
@@ -98,6 +106,10 @@ async function main() {
     const result = await cleanupDemoData();
     console.log(`[boot] demo cleanup: ${JSON.stringify(result)}`);
   } catch (e) { console.error("[boot] demo cleanup failed (continuing):", e.message); }
+  try {
+    const demo = await seedDemoWorkforce();
+    console.log(`[boot] workforce demo: ${JSON.stringify(demo)}`);
+  } catch (e) { console.error("[boot] workforce demo seed failed (continuing):", e.message); }
   try {
     const swept = await sweepOverdueInvoices();
     if (swept) console.log(`[boot] invoice sweep marked ${swept} invoice(s) overdue`);
