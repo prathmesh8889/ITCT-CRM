@@ -19,8 +19,9 @@ test("department overview aggregates work created across CRM modules", () => {
   const src = read("src/routes/department-overview.js");
   for (const table of ["tasks", "workforce_projects", "meetings", "followups", "calendar_events", "workforce_domain_records"])
     assert.ok(src.includes(table), `overview should include ${table}`);
-  for (const type of ["Task", "Project", "Meeting", "Follow-up", "Event", "Service Record"])
+  for (const type of ["Task", "Project", "Meeting", "Follow-up", "Service Record"])
     assert.ok(src.includes(`type: \"${type}\"`), `overview should expose ${type}`);
+  assert.ok(src.includes('event.kind === "holiday" ? "Holiday" : "Event"'), "overview should expose Event/Holiday activity");
 });
 
 test("calendar feed is isolated by Workforce department", () => {
