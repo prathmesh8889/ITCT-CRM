@@ -6,6 +6,7 @@ import { Btn, PrintProvider, ToastHost } from "./components/ui";
 import AppLayout from "./components/layout";
 import CompanyDetailsEditor from "./components/CompanyDetailsEditor";
 import DepartmentWorkspaceLauncher from "./components/DepartmentWorkspaceLauncher";
+import DepartmentTeamWorkPanel from "./components/DepartmentTeamWorkPanel";
 import Login from "./pages/Login";
 import ChangePassword from "./pages/ChangePassword";
 import UserProfile from "./pages/UserProfile";
@@ -44,7 +45,9 @@ function LoginGate() {
   const { user } = useStore();
   if (user) {
     const mustChange = !!(user as typeof user & { mustChangePassword?: boolean }).mustChangePassword;
-    return <Navigate to={mustChange ? "/change-password" : "/dashboard"} replace />;
+    const email = String(user.email || "").toLowerCase();
+    const isDemoDepartmentHead = email.startsWith("demo.") && email.includes(".l3@workforce.invalid");
+    return <Navigate to={mustChange ? "/change-password" : isDemoDepartmentHead ? "/department-workspace" : "/dashboard"} replace />;
   }
   return <Login />;
 }
@@ -58,7 +61,7 @@ function Root() {
     <Route element={user ? (mustChange ? <Navigate to="/change-password" replace /> : <AppLayout/>) : <Navigate to="/login" replace />}>
       <Route path="/profile/:id" element={<UserProfile/>}/>
       <Route path="/dashboard" element={<Guard mod="dashboard"><Dashboard/></Guard>}/>
-      <Route path="/department-workspace" element={<DepartmentWorkspace/>}/>
+      <Route path="/department-workspace" element={<><DepartmentTeamWorkPanel/><DepartmentWorkspace/></>}/>
       <Route path="/leads" element={<Guard mod="leads"><Leads/></Guard>}/>
       <Route path="/discovery" element={<Guard mod="discovery"><Discovery/></Guard>}/>
       <Route path="/pipeline" element={<Guard mod="deals"><Pipeline/></Guard>}/>
