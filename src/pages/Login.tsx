@@ -28,7 +28,9 @@ export default function Login() {
     setBusy(false);
     if (!r.ok) { setErr(r.error || "Login failed"); return; }
     toast("Welcome back", "ok", DEMO_MODE ? "Signed in to the demo workspace." : "Signed in to ITCT CRM.");
-    nav("/dashboard");
+    const loginEmail = email.trim().toLowerCase();
+    const isDemoDepartmentHead = loginEmail.startsWith("demo.") && loginEmail.includes(".l3@workforce.invalid");
+    nav(isDemoDepartmentHead ? "/department-workspace" : "/dashboard");
   };
 
   return (
