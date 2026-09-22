@@ -314,8 +314,9 @@ async function cleanupWorkforceDemoData() {
 }
 
 if (require.main === module) {
-  Promise.all([cleanupDemoData(), cleanupWorkforceDemoData()])
-    .then(([legacy, workforce]) => {
+  cleanupDemoData()
+    .then(async (legacy) => {
+      const workforce = await cleanupWorkforceDemoData();
       console.log("[cleanup-demo]", JSON.stringify({ legacy, workforce }));
       return db.end();
     })
