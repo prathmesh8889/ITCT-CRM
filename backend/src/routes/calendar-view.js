@@ -114,7 +114,7 @@ router.get("/calendar/availability", requireAuth, async (req, res, next) => {
     }
 
     const slots = [];
-    for (let startMin = minutes(dayStart); startMin + slotMinutes <= minutes(dayEnd); startMin += slotMinutes) {
+    for (let startMin = minutes(dayStart); startMin + slotMinutes <= minutes(dayEnd); startMin += Math.min(30, slotMinutes)) {
       const endMin = startMin + slotMinutes;
       const start = fromMinutes(startMin);
       const end = fromMinutes(endMin);
@@ -165,6 +165,7 @@ router.post("/calendar/meetings", requirePerm("meetings", "create"), async (req,
     const end = String(b.end_time || "");
     if (!title || !isoDate.test(date)) throw new HttpError(422, "title and valid date are required");
     if (!hhmm.test(start) || !hhmm.test(end) || end <= start) throw new HttpError(422, "start_time and end_time must be valid and end after start");
+    if (googleLocalEpoch(date, start) <= Date.now()) throw new HttpError(422, "Meeting slot must be in the future");
 
     const participants = [...new Set([
       Number(req.user.id),
