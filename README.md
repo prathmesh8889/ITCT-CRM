@@ -30,7 +30,7 @@ CREATE DATABASE itct_crm;
 cd backend
 npm install
 copy .env.example .env          :: set your DB password + a long JWT_SECRET
-npm run seed                    :: creates tables + demo data
+npm run seed                    :: creates tables + first admin only when DB is empty
 npm start                       :: http://localhost:8000
 ```
 Verify:
@@ -40,14 +40,14 @@ Verify:
 ### Terminal 2 — Frontend
 ```cmd
 npm install                     :: from the repository root
-copy .env.example .env          :: VITE_API_URL=http://localhost:8000/api  ·  VITE_DEMO_MODE=false
+copy .env.example .env          :: VITE_API_URL=http://localhost:8000/api
 npm run dev                     :: http://localhost:3000
 ```
 
 The top-right pill shows **Backend · PostgreSQL** (green) when connected. If the backend is
 unreachable the app shows a **“CRM server is unavailable”** screen with Retry — it never silently
-writes business data to the browser. An explicitly labelled *demo workspace* (browser-only) is
-available from that screen or via `VITE_DEMO_MODE=true`.
+writes business data to the browser. PostgreSQL is the only business-data source. The frontend
+automatically re-syncs from the backend every 60 seconds and whenever the tab regains focus.
 
 ## Authentication
 
@@ -74,7 +74,7 @@ the assistant fall back to the deterministic rules engine and report *“AI temp
 | Pipeline (Kanban, stage moves with rollback, deal CRUD) | ✅ full — `PATCH /api/deals/:id/stage` |
 | Notifications (bell, unread count, mark read) | ✅ full |
 | Global search (Ctrl+K) | ✅ full — `GET /api/search` |
-| Customers / Companies / Contacts, Follow-ups, Tasks, Meetings, Quotations, Invoices, Payments, Expenses, Products, Discovery jobs, Reports, Users/Roles/Teams, Automation, Audit, Settings | ✅ read-synced from PostgreSQL on login; write paths are being migrated module-by-module (backend endpoints already exist — see `backend/README.md`) |
+| Customers / Companies / Contacts, Follow-ups, Tasks, Meetings, Quotations, Invoices, Payments, Expenses, Products, Discovery jobs, Reports, Users/Roles/Teams, Automation, Audit, Settings | ✅ PostgreSQL-backed; auto re-sync every 60 seconds + on tab focus; backend remains source of truth |
 
 All money math (GST, discounts, paid/balance, invoice status) is authoritative on the backend.
 
@@ -86,14 +86,14 @@ All money math (GST, discounts, paid/balance, invoice status) is authoritative o
 │   ├── lib/apiTypes.ts   snake_case API contracts
 │   ├── lib/mappers.ts    central API ↔ UI mapping (integer IDs ⇄ UI IDs)
 │   ├── lib/hydrate.ts    loads every PostgreSQL collection into the UI store after login
-│   └── lib/db.ts         embedded workspace used ONLY in labelled demo mode
+│   └── lib/db.ts         in-memory UI cache; production business data is never persisted in browser storage
 ├── backend/              Node.js + Express + PostgreSQL API
 │   ├── src/server.js     app, CORS, health (503 semantics), error handling
 │   ├── src/db.js         pg pool + full schema (idempotent auto-migrate)
 │   ├── src/security.js   bcrypt, JWT, refresh hashing, RBAC, ownership helpers
 │   ├── src/engines.js    automation rules + Ollama client with rules-engine fallback
 │   ├── src/routes/       auth · crm · billing · admin
-│   ├── src/seed.js       demo data (50 leads, 20 deals, invoices, payments…)
+│   ├── src/seed.js       schema/bootstrap admin setup only; no business demo data
 │   └── tests/api.test.js node:test suite
 └── .github/workflows/ci.yml
 ```
@@ -114,7 +114,6 @@ Never commit `backend/.env`, `.env`, `node_modules/`, or `backend/uploads/` (all
   The included production server adds CSP, HSTS, anti-framing, no-sniff, referrer and permissions headers.
 - **Backend** — set `NODE_ENV=production`, managed `DATABASE_URL`, a unique random `JWT_SECRET` of at least
   48 characters, and explicit HTTPS `CORS_ORIGINS`. Production startup fails closed if these are unsafe.
-- Keep `ENABLE_DEMO_WORKFORCE=false` in production. Demo login accounts are disabled automatically.
 - Move the failed-login throttle and discovery worker to Redis/queue before scaling to multiple backend replicas.
 
 ## Troubleshooting
