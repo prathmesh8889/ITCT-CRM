@@ -3,6 +3,12 @@ import type { DB } from "./types";
 
 const KEY = "itct.db.v2";
 
+const demoPersistenceEnabled = (): boolean => {
+  const builtInDemo = String(import.meta.env.VITE_DEMO_MODE ?? "false").toLowerCase() === "true";
+  if (builtInDemo) return true;
+  try { return sessionStorage.getItem("itct.demo") === "1"; } catch { return false; }
+};
+
 export function uid(): string {
   return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 }
@@ -48,9 +54,19 @@ function blankDB(): DB {
   };
 }
 
-function load(): DB {
+function purgeProductionCache(): void {
   try {
-    // Remove the old browser-only demo database from previous builds.
+    localStorage.removeItem(KEY);
+    localStorage.removeItem("itct.db.v1");
+  } catch { /* unavailable storage */ }
+}
+
+function load(): DB {
+  if (!demoPersistenceEnabled()) {
+    purgeProductionCache();
+    return blankDB();
+  }
+  try {
     localStorage.removeItem("itct.db.v1");
     const raw = localStorage.getItem(KEY);
     if (raw) {
@@ -70,12 +86,16 @@ const listeners = new Set<() => void>();
 export function getDB(): DB { return state; }
 
 export function commit(): void {
-  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* ignore quota */ }
+  if (demoPersistenceEnabled()) {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* ignore quota */ }
+  } else {
+    purgeProductionCache();
+  }
   snap = { db: state, rev: snap.rev + 1 };
   listeners.forEach((l) => l());
 }
 
-/** Mutate the database in place, then persist + notify subscribers. */
+/** Mutate the in-memory store. Only explicitly enabled demo workspaces persist locally. */
 export function mutate<T>(fn: (d: DB) => T): T {
   const r = fn(state);
   commit();
@@ -97,5 +117,6 @@ export function resetDB(): void {
 }
 
 export function storageKB(): number {
+  if (!demoPersistenceEnabled()) return 0;
   try { return Math.round((localStorage.getItem(KEY) || "").length / 1024); } catch { return 0; }
 }
