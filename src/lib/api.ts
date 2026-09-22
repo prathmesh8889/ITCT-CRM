@@ -12,6 +12,9 @@ import axios from "axios";
 import type { AxiosError, InternalAxiosRequestConfig } from "axios";
 
 export const API_URL = (import.meta.env.VITE_API_URL as string) || "http://localhost:8000/api";
+if (import.meta.env.PROD && !API_URL.startsWith("https://") && !API_URL.startsWith("/")) {
+  throw new Error("Production VITE_API_URL must use HTTPS or a same-origin relative path.");
+}
 /** DEMO MODE — dev-only browser-data workspace. Default (false) = production,
  *  The Node.js (Express) + PostgreSQL backend is the only data source —
  *  there is NO silent fallback to browser storage. */
@@ -37,7 +40,7 @@ const REFRESH_KEY = "itct.refresh";
 export const api = axios.create({ baseURL: API_URL, timeout: 15000 });
 
 api.interceptors.request.use((cfg) => {
-  const t = localStorage.getItem(TOKEN_KEY);
+  const t = sessionStorage.getItem(TOKEN_KEY);
   if (t) cfg.headers.Authorization = `Bearer ${t}`;
   return cfg;
 });
@@ -47,13 +50,13 @@ let refreshing: Promise<string> | null = null;
 type Retried = InternalAxiosRequestConfig & { _retry?: boolean };
 
 async function doRefresh(): Promise<string> {
-  const rt = localStorage.getItem(REFRESH_KEY);
+  const rt = sessionStorage.getItem(REFRESH_KEY);
   if (!rt) throw new Error("no-refresh-token");
   // raw axios — must NOT go through `api` (would re-enter the interceptor)
   const r = await axios.post<{ access_token: string; refresh_token: string }>(
     `${API_URL}/auth/refresh`, { refresh_token: rt }, { timeout: 10000 });
-  localStorage.setItem(TOKEN_KEY, r.data.access_token);
-  localStorage.setItem(REFRESH_KEY, r.data.refresh_token);
+  sessionStorage.setItem(TOKEN_KEY, r.data.access_token);
+  sessionStorage.setItem(REFRESH_KEY, r.data.refresh_token);
   return r.data.access_token;
 }
 
@@ -94,12 +97,12 @@ api.interceptors.response.use(
 );
 
 export const setTokens = (access: string | null, refresh?: string | null) => {
-  if (access) localStorage.setItem(TOKEN_KEY, access); else localStorage.removeItem(TOKEN_KEY);
-  if (refresh !== undefined) { if (refresh) localStorage.setItem(REFRESH_KEY, refresh); else localStorage.removeItem(REFRESH_KEY); }
+  if (access) sessionStorage.setItem(TOKEN_KEY, access); else sessionStorage.removeItem(TOKEN_KEY);
+  if (refresh !== undefined) { if (refresh) sessionStorage.setItem(REFRESH_KEY, refresh); else sessionStorage.removeItem(REFRESH_KEY); }
 };
 export const clearTokens = () => setTokens(null, null);
-export const getToken = () => localStorage.getItem(TOKEN_KEY);
-export const hasSession = () => !!localStorage.getItem(TOKEN_KEY);
+export const getToken = () => sessionStorage.getItem(TOKEN_KEY);
+export const hasSession = () => !!sessionStorage.getItem(TOKEN_KEY);
 
 export interface Paged<T> { items: T[]; total: number; page: number; page_size: number; }
 export interface Query { page?: number; page_size?: number; search?: string; status?: string; owner?: string; source?: string; priority?: string; city?: string; sort_by?: string; sort_order?: "asc" | "desc"; [k: string]: unknown; }
