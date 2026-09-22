@@ -27,10 +27,10 @@ npm start           :: http://localhost:8000
 
 | Role | Email | Password |
 | --- | --- | --- |
-| Super Admin (owner — Kautuk Ade) | `admin@crm.local` | `Admin@123` |
-| Sales Manager | `rohit@itctcrm.in` | `Admin@123` |
-| Sales Executives | `rahul@itctcrm.in` (+ priya/amit/sneha/vikram) | `Sales@123` |
-| Accountant | `neha@itctcrm.in` | `Sales@123` |
+| Super Admin (owner — Kautuk Ade) | `BOOTSTRAP_ADMIN_EMAIL` | `<set-in-environment>` |
+| Sales Manager | `rohit@itctcrm.in` | `<set-in-environment>` |
+| Sales Executives | `rahul@itctcrm.in` (+ priya/amit/sneha/vikram) | `<demo-password-not-stored>` |
+| Accountant | `neha@itctcrm.in` | `<demo-password-not-stored>` |
 
 **Change the admin password in production.**
 
