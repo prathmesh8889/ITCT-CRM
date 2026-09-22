@@ -173,6 +173,12 @@ function ensureOrganizationSchema() {
           updated_at TIMESTAMPTZ DEFAULT now()
         );
         CREATE INDEX IF NOT EXISTS ix_calendar_events_date ON calendar_events(event_date);
+
+        ALTER TABLE meetings ADD COLUMN IF NOT EXISTS google_event_id TEXT;
+        ALTER TABLE meetings ADD COLUMN IF NOT EXISTS google_sync_status TEXT NOT NULL DEFAULT 'not_configured';
+        ALTER TABLE meetings ADD COLUMN IF NOT EXISTS google_html_link TEXT DEFAULT '';
+        ALTER TABLE meetings ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
+        CREATE INDEX IF NOT EXISTS ix_meetings_date_time ON meetings(date, start_time, end_time);
       `);
 
       await migrateLegacyDepartmentDefaults();
