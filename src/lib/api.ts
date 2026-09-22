@@ -5,8 +5,7 @@
  * point VITE_API_URL at it (http://localhost:8000/api) and these calls become
  * the data source. Endpoints mirror backend/src/routes/* exactly.
  *
- * The embedded demo engine is used only when VITE_DEMO_MODE=true or the user
- * explicitly opts into the labelled demo workspace.
+ * Production uses the backend as the only data source; browser demo mode is disabled.
  */
 import axios from "axios";
 import type { AxiosError, InternalAxiosRequestConfig } from "axios";
@@ -15,23 +14,15 @@ export const API_URL = (import.meta.env.VITE_API_URL as string) || "http://local
 if (import.meta.env.PROD && !API_URL.startsWith("https://") && !API_URL.startsWith("/")) {
   throw new Error("Production VITE_API_URL must use HTTPS or a same-origin relative path.");
 }
-/** DEMO MODE — dev-only browser-data workspace. Default (false) = production,
- *  The Node.js (Express) + PostgreSQL backend is the only data source —
- *  there is NO silent fallback to browser storage. */
-/**
- * Demo mode: ONLY when VITE_DEMO_MODE=true, or when the user explicitly opts in
- * from the "server unavailable" screen (enableDemo). Never a silent fallback —
- * the UI always labels demo mode, and production writes go to the API.
- */
-export let DEMO_MODE = String(import.meta.env.VITE_DEMO_MODE ?? "false").toLowerCase() === "true"
-  || (typeof sessionStorage !== "undefined" && sessionStorage.getItem("itct.demo") === "1");
+/** Production-only mode. PostgreSQL/backend is the single source of truth.
+ * Legacy browser-demo flags are cleared and cannot be enabled. */
+export const DEMO_MODE = false;
+try { sessionStorage.removeItem("itct.demo"); } catch { /* storage unavailable */ }
 export function enableDemo(): void {
-  DEMO_MODE = true;
-  try { sessionStorage.setItem("itct.demo", "1"); } catch { /* ignore */ }
+  try { sessionStorage.removeItem("itct.demo"); } catch { /* storage unavailable */ }
 }
 export function disableDemo(): void {
-  DEMO_MODE = false;
-  try { sessionStorage.removeItem("itct.demo"); } catch { /* ignore */ }
+  try { sessionStorage.removeItem("itct.demo"); } catch { /* storage unavailable */ }
 }
 
 const TOKEN_KEY = "itct.token";
