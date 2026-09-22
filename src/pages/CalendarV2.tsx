@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Pencil, Plus, Trash2, Video } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api, DEMO_MODE } from "../lib/api";
-import { useDB } from "../lib/db";
+import { mutate, useDB } from "../lib/db";
 import { todayISO } from "../lib/services";
 import { useStore } from "../store";
 import { Badge, Btn, Field, Input, Modal, Select, Textarea, Toggle } from "../components/ui";
@@ -16,6 +16,7 @@ type Form = { title: string; kind: "event" | "holiday"; date: string; start_time
 type BookedMeeting = {
   id: number; title: string; date: string; start_time: string; end_time: string; location: string;
   meeting_link: string; agenda: string; google_sync_status: string; google_html_link: string;
+  participants?: number[]; lead_id?: number | null; customer_id?: number | null; created_at?: string;
 };
 type Slot = { start: string; end: string; available: boolean; source: string | null };
 type Availability = { date: string; slot_minutes: number; google_connected: boolean; google_error: string | null; slots: Slot[] };
@@ -92,6 +93,7 @@ export default function CalendarV2() {
     setEditing(null); setForm(blank(selected, kind)); setModal(true);
   };
   const requestMeeting = () => {
+    if (DEMO_MODE) { toast("Protected meeting booking is available when the CRM backend is connected", "warn"); return; }
     if (!can("meetings", "create")) { toast("You do not have permission to schedule meetings", "warn"); return; }
     setMeetingForm(blankMeeting(selected));
     setSlots([]);
@@ -148,6 +150,26 @@ export default function CalendarV2() {
       } else {
         toast("Meeting booked; Google Calendar is not configured yet", "ok");
       }
+      mutate((db) => {
+        const id = String(r.data.id);
+        db.meetings = db.meetings.filter((m) => m.id !== id);
+        db.meetings.unshift({
+          id,
+          title: r.data.title,
+          entityType: r.data.lead_id ? "lead" : "customer",
+          entityId: String(r.data.lead_id ?? r.data.customer_id ?? ""),
+          employeeIds: (r.data.participants || []).map(String),
+          date: r.data.date,
+          start: r.data.start_time,
+          end: r.data.end_time,
+          location: r.data.location || "",
+          link: r.data.meeting_link || "",
+          agenda: r.data.agenda || "",
+          notes: "",
+          outcome: "",
+          createdAt: r.data.created_at || new Date().toISOString(),
+        });
+      });
       setMeetingModal(false);
       await load();
     } catch (e) {
