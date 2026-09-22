@@ -1,11 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Eye, EyeOff, ArrowRight, ShieldCheck, Radar, IndianRupee, Database, FlaskConical } from "lucide-react";
+import { Eye, EyeOff, ArrowRight, ShieldCheck, Radar, IndianRupee, Database } from "lucide-react";
 import { useStore } from "../store";
-import { DEMO_MODE } from "../lib/api";
 import { Btn, Field, Input } from "../components/ui";
-
-const demoAccounts: Array<{ label: string; email: string; pw: string }> = [];
 
 export default function Login() {
   const { login, toast } = useStore();
@@ -22,10 +19,8 @@ export default function Login() {
     const r = await login(email, pw);
     setBusy(false);
     if (!r.ok) { setErr(r.error || "Login failed"); return; }
-    toast("Welcome back", "ok", DEMO_MODE ? "Signed in to the demo workspace." : "Signed in to ITCT CRM.");
-    const loginEmail = email.trim().toLowerCase();
-    const isDemoDepartmentHead = loginEmail.startsWith("demo.") && loginEmail.includes(".l3@workforce.invalid");
-    nav(isDemoDepartmentHead ? "/department-workspace" : "/dashboard");
+    toast("Welcome back", "ok", "Signed in to ITCT CRM.");
+    nav("/dashboard");
   };
 
   return (
@@ -75,19 +70,13 @@ export default function Login() {
             <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-400">IT Cyber Technologies Pvt Ltd</div>
           </div>
 
-          {DEMO_MODE ? (
-            <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[11.5px] font-semibold leading-relaxed text-amber-800 dark:border-amber-800 dark:bg-amber-900/25 dark:text-amber-300">
-              <FlaskConical size={14} className="mt-0.5 shrink-0" /> DEMO MODE — browser-only sample data (VITE_DEMO_MODE=true)
-            </div>
-          ) : (
-            <div className="mb-3 flex items-start gap-2 rounded-md border border-brand-200 bg-brand-50 px-3 py-2 text-[11.5px] font-semibold leading-relaxed text-brand-700 dark:border-brand-800 dark:bg-brand-900/25 dark:text-brand-300">
-              <Database size={14} className="mt-0.5 shrink-0" /> Secure company CRM workspace · Node.js + PostgreSQL
-            </div>
-          )}
+          <div className="mb-3 flex items-start gap-2 rounded-md border border-brand-200 bg-brand-50 px-3 py-2 text-[11.5px] font-semibold leading-relaxed text-brand-700 dark:border-brand-800 dark:bg-brand-900/25 dark:text-brand-300">
+            <Database size={14} className="mt-0.5 shrink-0" /> Live company CRM workspace · PostgreSQL is the source of truth
+          </div>
 
           <div className="card p-5 sm:p-6">
             <h2 className="hd text-[19px]">Sign in</h2>
-            <p className="mt-0.5 text-[13px] text-ink-500">{DEMO_MODE ? "Use a demo workspace account." : "Use your workspace account to continue."}</p>
+            <p className="mt-0.5 text-[13px] text-ink-500">Use your company workspace account to continue.</p>
             <form onSubmit={submit} className="mt-5 space-y-4">
               <Field label="Email" req>
                 <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@itctcrm.in" autoComplete="email" autoFocus />
@@ -103,8 +92,8 @@ export default function Login() {
               {err && (
                 <div className="a-fade-up rounded-md border border-red-200 bg-red-50 px-3 py-2.5 text-[12.5px] font-medium text-red-700 dark:border-red-900 dark:bg-red-900/25 dark:text-red-300">
                   {err}
-                  {!DEMO_MODE && err.includes("unavailable") && (
-                    <div className="mt-1 font-normal text-red-500/90">Start the backend: <span className="num">cd backend · npm start</span></div>
+                  {err.includes("unavailable") && (
+                    <div className="mt-1 font-normal text-red-500/90">The production backend is temporarily unavailable. Please retry shortly.</div>
                   )}
                 </div>
               )}
@@ -113,23 +102,9 @@ export default function Login() {
               </Btn>
             </form>
 
-            {DEMO_MODE && (
-              <div className="mt-5 border-t border-ink-100 pt-4 dark:border-ink-800">
-                <div className="mb-2 text-[10.5px] font-bold uppercase tracking-[0.1em] text-ink-400">Demo accounts</div>
-                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-                  {demoAccounts.map((a) => (
-                    <button key={a.email} type="button" onClick={() => { setEmail(a.email); setPw(a.pw); setErr(""); }}
-                      className="rounded-md border border-ink-200 px-2 py-1.5 text-left text-[11.5px] font-medium text-ink-600 transition-all hover:border-brand-400 hover:text-brand-700 dark:border-ink-700 dark:text-ink-300">
-                      {a.label}
-                      <span className="num block truncate text-[10px] font-normal text-ink-400">{a.email}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
           <p className="mt-4 text-center text-[11px] text-ink-400">
-            {DEMO_MODE ? "Demo data lives only in this browser." : "Sessions use JWT with refresh-token rotation."}
+            Live data is stored in PostgreSQL · Sessions use JWT with refresh-token rotation.
           </p>
         </div>
       </div>
