@@ -174,4 +174,5 @@ module.exports = {
   isGoogleSlotBusy: isSlotBusy,
   createGoogleCalendarEvent: createEvent,
   googleCalendarTimeZone: cfg.timeZone,
+  googleLocalEpoch: intervalMs,
 };
