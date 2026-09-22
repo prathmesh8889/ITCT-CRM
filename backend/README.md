@@ -15,7 +15,7 @@ npm install
 copy .env.example .env
 :: edit .env → set your Postgres password in DATABASE_URL and a long JWT_SECRET
 
-npm run seed        :: creates tables + demo data (also done automatically on start)
+npm run seed        :: creates tables and the first admin only when the database is empty
 npm start           :: http://localhost:8000
 ```
 
@@ -23,16 +23,9 @@ npm start           :: http://localhost:8000
 - Dev mode with auto-restart: `npm run dev`
 - Tests: `npm test` (units run without Postgres; set `TEST_DATABASE_URL` for integration tests)
 
-## Demo login
+## Production login
 
-| Role | Email | Password |
-| --- | --- | --- |
-| Super Admin (owner — Kautuk Ade) | `BOOTSTRAP_ADMIN_EMAIL` | `<set-in-environment>` |
-| Sales Manager | `rohit@itctcrm.in` | `<set-in-environment>` |
-| Sales Executives | `rahul@itctcrm.in` (+ priya/amit/sneha/vikram) | `<demo-password-not-stored>` |
-| Accountant | `neha@itctcrm.in` | `<demo-password-not-stored>` |
-
-**Change the admin password in production.**
+Production accounts live only in PostgreSQL. For a brand-new empty database, set `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`, run `npm run seed` once, then remove/rotate the bootstrap password variable. No demo users or sample business records are created.
 
 ## API surface (matches the React frontend exactly)
 
@@ -89,7 +82,7 @@ backend/
     db.js            pg pool + full PostgreSQL schema (auto-migrate)
     security.js      bcrypt, JWT, refresh hashing, RBAC middleware, ownership helpers
     engines.js       automation rules + Ollama client with rules-engine fallback
-    seed.js          demo data (50 leads, 20 deals, invoices, payments, rules…)
+    seed.js          schema/bootstrap admin setup only; no business demo data
     routes/auth.js   login (throttled) · refresh rotation · logout · me · change-password
     routes/crm.js    leads · customers · companies · contacts · deals · followups ·
                      tasks · meetings · calls · discovery jobs
