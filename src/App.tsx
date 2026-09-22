@@ -45,9 +45,7 @@ function LoginGate() {
   const { user } = useStore();
   if (user) {
     const mustChange = !!(user as typeof user & { mustChangePassword?: boolean }).mustChangePassword;
-    const email = String(user.email || "").toLowerCase();
-    const isDemoDepartmentHead = email.startsWith("demo.") && email.includes(".l3@workforce.invalid");
-    return <Navigate to={mustChange ? "/change-password" : isDemoDepartmentHead ? "/department-workspace" : "/dashboard"} replace />;
+    return <Navigate to={mustChange ? "/change-password" : "/dashboard"} replace />;
   }
   return <Login />;
 }

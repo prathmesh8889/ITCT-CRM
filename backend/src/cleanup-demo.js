@@ -6,6 +6,9 @@
  * removing those seeded identities.
  */
 const { db, initSchema } = require("./db");
+const { ensureOrganizationSchema } = require("./organization-schema");
+const { ensureWorkforceDomainSchema } = require("./workforce-domain-schema");
+const { ensureTeamSchema } = require("./team-schema");
 
 const OWNER_EMAIL = "admin@crm.local";
 const DEMO_EMAILS = [
@@ -171,11 +174,154 @@ async function cleanupDemoData() {
   });
 }
 
+
+/**
+ * Remove the later Workforce OS training dataset without touching real CRM
+ * records. Demo rows are identified only by the explicit seed fingerprints
+ * used by demo-workforce-seed.js.
+ */
+async function cleanupWorkforceDemoData() {
+  await initSchema();
+  await ensureOrganizationSchema();
+  await ensureWorkforceDomainSchema();
+  await ensureTeamSchema();
+
+  return db.tx(async (c) => {
+    const already = await c.query("SELECT 1 FROM crm_settings WHERE key = 'demo_cleanup_v2'");
+    if (already.rowCount) return { skipped: true, reason: "already cleaned" };
+
+    const owner = (await c.query(`
+      SELECT u.id
+        FROM users u
+        LEFT JOIN roles r ON r.id = u.role_id
+       WHERE u.deleted_at IS NULL
+         AND lower(u.email) NOT LIKE 'demo.%@workforce.invalid'
+       ORDER BY CASE WHEN lower(trim(COALESCE(r.name,''))) = 'super admin' THEN 0 ELSE 1 END, u.id
+       LIMIT 1
+    `)).rows[0];
+    if (!owner) throw new Error("Refusing Workforce demo cleanup: no real CRM owner/user exists");
+    const ownerId = Number(owner.id);
+
+    const demoUsers = ids((await c.query(`
+      SELECT id FROM users
+       WHERE lower(email) LIKE 'demo.%@workforce.invalid'
+          OR name LIKE 'DEMO · %'
+    `)).rows);
+    const demoTeams = ids((await c.query(`
+      SELECT id FROM teams
+       WHERE name LIKE 'DEMO · %'
+          OR focus = 'Demo team for Workforce OS hierarchy and work-scope training'
+    `)).rows);
+
+    const removed = {};
+    const del = async (key, sql, params = []) => {
+      const r = await c.query(sql, params);
+      removed[key] = r.rowCount || 0;
+    };
+
+    // Seeded Workforce OS objects are explicitly marked, so these deletes do not
+    // match normal company records.
+    await del("workforce_demo_tasks",
+      "DELETE FROM tasks WHERE description LIKE '[WORKFORCE DEMO]%'");
+    await del("workforce_demo_projects",
+      "DELETE FROM workforce_projects WHERE project_code LIKE 'DEMO-%' OR description LIKE '[WORKFORCE DEMO]%'");
+
+    if (any(demoUsers)) {
+      // Demo-only daily attendance belongs to the fake users and is removed.
+      await del("workforce_demo_intern_daily",
+        "DELETE FROM workforce_intern_daily WHERE user_id = ANY($1::int[])", [demoUsers]);
+      await del("workforce_demo_notifications",
+        "DELETE FROM notifications WHERE user_id = ANY($1::int[])", [demoUsers]);
+      await del("workforce_demo_audit",
+        "DELETE FROM audit_logs WHERE user_id = ANY($1::int[]) OR user_name LIKE 'DEMO · %'", [demoUsers]);
+      await del("workforce_demo_refresh_tokens",
+        "DELETE FROM refresh_tokens WHERE user_id = ANY($1::int[])", [demoUsers]);
+
+      // Preserve any real company record that was manually linked to a training
+      // identity by detaching/reassigning it before the fake user is deleted.
+      await c.query("UPDATE users SET reporting_manager_id=NULL WHERE reporting_manager_id = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE teams SET lead_user_id=NULL WHERE lead_user_id = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE teams SET created_by=$1 WHERE created_by = ANY($2::int[])", [ownerId, demoUsers]);
+      await c.query("UPDATE leads SET assigned_user_id=NULL WHERE assigned_user_id = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE leads SET created_by=$1 WHERE created_by = ANY($2::int[])", [ownerId, demoUsers]);
+      await c.query("UPDATE discovery_jobs SET created_by=$1 WHERE created_by = ANY($2::int[])", [ownerId, demoUsers]);
+      await c.query("UPDATE customers SET account_manager_id=NULL WHERE account_manager_id = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE customers SET created_by=$1 WHERE created_by = ANY($2::int[])", [ownerId, demoUsers]);
+      await c.query("UPDATE companies SET account_manager_id=NULL WHERE account_manager_id = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE deals SET assigned_user_id=NULL WHERE assigned_user_id = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE followups SET employee_id=NULL WHERE employee_id = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE tasks SET assigned_to_id=NULL WHERE assigned_to_id = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE tasks SET created_by_id=$1 WHERE created_by_id = ANY($2::int[])", [ownerId, demoUsers]);
+      await c.query("UPDATE calls SET employee_id=NULL WHERE employee_id = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE notes SET author_id=NULL WHERE author_id = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE quotations SET created_by=$1 WHERE created_by = ANY($2::int[])", [ownerId, demoUsers]);
+      await c.query("UPDATE invoices SET created_by=$1 WHERE created_by = ANY($2::int[])", [ownerId, demoUsers]);
+      await c.query("UPDATE payments SET recorded_by=$1 WHERE recorded_by = ANY($2::int[])", [ownerId, demoUsers]);
+      await c.query("UPDATE expenses SET employee_id=NULL WHERE employee_id = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE activities SET actor_id=NULL WHERE actor_id = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE attachments SET uploaded_by=NULL WHERE uploaded_by = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE meetings SET created_by=$1 WHERE created_by = ANY($2::int[])", [ownerId, demoUsers]);
+      await c.query("UPDATE calendar_events SET created_by=$1 WHERE created_by = ANY($2::int[])", [ownerId, demoUsers]);
+      await c.query("UPDATE workforce_domain_records SET assigned_user_id=NULL WHERE assigned_user_id = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE workforce_domain_records SET created_by=$1 WHERE created_by = ANY($2::int[])", [ownerId, demoUsers]);
+      await c.query("UPDATE workforce_domain_records SET approved_by=NULL,approved_at=NULL WHERE approved_by = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE workforce_projects SET project_manager_id=NULL WHERE project_manager_id = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE workforce_projects SET assigned_employee_id=NULL WHERE assigned_employee_id = ANY($1::int[])", [demoUsers]);
+      await c.query("UPDATE workforce_projects SET created_by=$1 WHERE created_by = ANY($2::int[])", [ownerId, demoUsers]);
+    }
+
+    if (any(demoTeams)) {
+      await c.query("UPDATE users SET team_id=NULL WHERE team_id = ANY($1::int[])", [demoTeams]);
+      await c.query("UPDATE leads SET assigned_team_id=NULL WHERE assigned_team_id = ANY($1::int[])", [demoTeams]);
+    }
+    if (any(demoUsers) || any(demoTeams)) {
+      await del("workforce_demo_lead_assignments",
+        "DELETE FROM lead_assignments WHERE user_id = ANY($1::int[]) OR team_id = ANY($2::int[])",
+        [demoUsers, demoTeams]);
+    }
+
+    if (any(demoUsers)) {
+      await del("workforce_demo_users", "DELETE FROM users WHERE id = ANY($1::int[])", [demoUsers]);
+    }
+    if (any(demoTeams)) {
+      await del("workforce_demo_teams", "DELETE FROM teams WHERE id = ANY($1::int[])", [demoTeams]);
+    }
+
+    // Remove any assignment-setting references to deleted training users.
+    const assignment = (await c.query("SELECT value FROM crm_settings WHERE key='assignment'")).rows[0]?.value;
+    if (assignment && typeof assignment === "object" && any(demoUsers)) {
+      const bad = new Set(demoUsers.map(String));
+      if (assignment.high_value_user_id != null && bad.has(String(assignment.high_value_user_id))) {
+        assignment.high_value_user_id = "";
+      }
+      for (const key of ["category_map", "location_map"]) {
+        if (assignment[key] && typeof assignment[key] === "object") {
+          for (const [name, value] of Object.entries(assignment[key])) {
+            if (bad.has(String(value))) delete assignment[key][name];
+          }
+        }
+      }
+      await c.query("UPDATE crm_settings SET value=$1 WHERE key='assignment'", [JSON.stringify(assignment)]);
+    }
+
+    await c.query("DELETE FROM crm_settings WHERE key='workforce_demo_v1'");
+    await c.query(
+      "INSERT INTO crm_settings (key,value) VALUES ('demo_cleanup_v2',$1::jsonb) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
+      [JSON.stringify({ completed_at: new Date().toISOString(), removed })],
+    );
+    return { skipped: false, removed };
+  });
+}
+
 if (require.main === module) {
   cleanupDemoData()
-    .then((r) => { console.log("[cleanup-demo]", JSON.stringify(r)); return db.end(); })
+    .then(async (legacy) => {
+      const workforce = await cleanupWorkforceDemoData();
+      console.log("[cleanup-demo]", JSON.stringify({ legacy, workforce }));
+      return db.end();
+    })
     .then(() => process.exit(0))
     .catch(async (e) => { console.error("[cleanup-demo] FAILED:", e.message); try { await db.end(); } catch {} process.exit(1); });
 }
 
-module.exports = { cleanupDemoData };
+module.exports = { cleanupDemoData, cleanupWorkforceDemoData };

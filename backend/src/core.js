@@ -20,7 +20,6 @@ const config = {
   refreshDays: Number(process.env.REFRESH_TOKEN_EXPIRE_DAYS || 7),
   corsOrigins: (process.env.CORS_ORIGINS || (isProduction ? "" : "http://localhost:5173,http://127.0.0.1:5173"))
     .split(",").map((s) => s.trim()).filter(Boolean),
-  enableDemoWorkforce: String(process.env.ENABLE_DEMO_WORKFORCE || "false").toLowerCase() === "true",
   ollamaUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
   ollamaModel: process.env.OLLAMA_MODEL || "qwen3",
   uploadDir: process.env.UPLOAD_DIR || "uploads",

@@ -4,8 +4,7 @@ const cors = require("cors");
 const { db, initSchema } = require("./db");
 const { config, assertProductionConfig, HttpError } = require("./core");
 const { sweepOverdueInvoices } = require("./engines");
-const { cleanupDemoData } = require("./cleanup-demo");
-const { seedDemoWorkforce } = require("./demo-workforce-seed");
+const { cleanupDemoData, cleanupWorkforceDemoData } = require("./cleanup-demo");
 const { ensureAuthSchema } = require("./auth-schema");
 const { ensureAccessLevelSchema } = require("./access-levels");
 const { ensureOrganizationSchema } = require("./organization-schema");
@@ -36,14 +35,13 @@ app.use(express.json({ limit: "2mb" }));
 app.get("/api/health", async (_req, res) => {
   try {
     await db.query("SELECT 1");
-    const cleanup = await db.one("SELECT value FROM crm_settings WHERE key = 'demo_cleanup_v1'");
-    const workforceDemo = await db.one("SELECT value FROM crm_settings WHERE key = 'workforce_demo_v1'");
+    const cleanup = await db.one("SELECT value FROM crm_settings WHERE key = 'demo_cleanup_v2'");
     res.json({
       status: "ok",
       database: "connected",
       version: config.version,
-      demo_data: cleanup ? "clean" : "pending_cleanup",
-      workforce_demo: workforceDemo?.value || null,
+      data_mode: "production",
+      demo_data: cleanup ? "removed" : "cleanup_pending",
     });
   } catch (e) {
     console.error("[health] database check failed:", e.message);
@@ -110,21 +108,12 @@ async function main() {
     await ensureTeamSchema();
   }
   try {
-    const result = await cleanupDemoData();
-    console.log(`[boot] demo cleanup: ${JSON.stringify(result)}`);
-  } catch (e) { console.error("[boot] demo cleanup failed (continuing):", e.message); }
-  if (config.enableDemoWorkforce) {
-    try {
-      const demo = await seedDemoWorkforce();
-      console.log(`[boot] workforce demo: ${JSON.stringify(demo)}`);
-    } catch (e) { console.error("[boot] workforce demo seed failed (continuing):", e.message); }
-  } else if (config.isProduction) {
-    try {
-      const disabled = await db.query(
-        "UPDATE users SET active=FALSE WHERE active=TRUE AND lower(email) LIKE 'demo.%@workforce.invalid'"
-      );
-      if (disabled.rowCount) console.log(`[boot] disabled ${disabled.rowCount} production demo login(s)`);
-    } catch (e) { console.error("[boot] demo-login disable failed (continuing):", e.message); }
+    const legacy = await cleanupDemoData();
+    const workforce = await cleanupWorkforceDemoData();
+    console.log(`[boot] production data cleanup: ${JSON.stringify({ legacy, workforce })}`);
+  } catch (e) {
+    console.error("[boot] FATAL — demo-data cleanup failed:", e.message);
+    process.exit(1);
   }
   try {
     const swept = await sweepOverdueInvoices();

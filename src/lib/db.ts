@@ -3,11 +3,7 @@ import type { DB } from "./types";
 
 const KEY = "itct.db.v2";
 
-const demoPersistenceEnabled = (): boolean => {
-  const builtInDemo = String(import.meta.env.VITE_DEMO_MODE ?? "false").toLowerCase() === "true";
-  if (builtInDemo) return true;
-  try { return sessionStorage.getItem("itct.demo") === "1"; } catch { return false; }
-};
+const demoPersistenceEnabled = (): boolean => false;
 
 export function uid(): string {
   return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
