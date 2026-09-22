@@ -15,7 +15,8 @@ import { hydrateFromBackend } from "./lib/hydrate";
 import type { MeResponse } from "./lib/apiTypes";
 import type { ModuleKey, Perm, User } from "./lib/types";
 
-const SKEY = "itct.session"; // demo mode only
+const SKEY = "itct.session"; // legacy demo key; production demo mode is disabled
+const AUTO_SYNC_MS = 60_000;
 
 type SecureUser = User & { mustChangePassword?: boolean };
 const mapMeUser = (me: MeResponse): SecureUser => {
@@ -56,7 +57,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [bootKey, setBootKey] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"));
-  const mode: "backend" | "demo" = DEMO_MODE ? "demo" : "backend";
+  const mode: "backend" | "demo" = "backend";
+  const mustChangePassword = !!(user as SecureUser | null)?.mustChangePassword;
   const retryBoot = useCallback(() => { setBooting(true); setServerDown(false); setBootKey((k) => k + 1); }, []);
 
   useEffect(() => {
@@ -121,6 +123,62 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setIsSuper(me.is_super);
     setRoleName(me.role || "");
   }, [user?.id]);
+
+
+  const syncBackendData = useCallback(async () => {
+    if (DEMO_MODE || !user || mustChangePassword || !hasSession()) return;
+    try {
+      const me = (await authApi.me()).data as MeResponse;
+      const mapped = mapMeUser(me);
+      if (mapped.mustChangePassword) {
+        setUser(mapped);
+        return;
+      }
+      await hydrateFromBackend(me.perms || {}, me.is_super);
+      setUser(mapped);
+      setPerms(me.perms || {});
+      setIsSuper(me.is_super);
+      setRoleName(me.role || "");
+      setServerDown(false);
+    } catch {
+      // Keep the last good in-memory snapshot during a temporary network issue.
+      // If auth refresh failed, api.ts has already cleared the session.
+      if (!hasSession()) {
+        setUser(null);
+        setPerms({});
+        setIsSuper(false);
+        setRoleName("");
+      }
+    }
+  }, [user?.id, mustChangePassword]);
+
+  // Keep the CRM view synchronized with PostgreSQL automatically. Writes already
+  // update the UI immediately; this catches updates made by other users/devices.
+  useEffect(() => {
+    if (DEMO_MODE || !user || mustChangePassword) return;
+    let disposed = false;
+    let syncing = false;
+
+    const sync = async () => {
+      if (disposed || syncing || document.visibilityState === "hidden") return;
+      syncing = true;
+      try { await syncBackendData(); } finally { syncing = false; }
+    };
+    const timer = window.setInterval(() => { void sync(); }, AUTO_SYNC_MS);
+    const onFocus = () => { void sync(); };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void sync();
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [user?.id, mustChangePassword, syncBackendData]);
 
   const login = useCallback(async (email: string, pw: string) => {
     if (!DEMO_MODE) {
