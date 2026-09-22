@@ -1,15 +1,39 @@
-/** Employee profile + admin password reset endpoints. */
+/** Employee profile + controlled admin password reset endpoints. */
 const express = require("express");
 const { db } = require("../db");
 const { HttpError } = require("../core");
-const { requireAuth, requirePerm, rolePerms, hashPassword } = require("../security");
+const { requireAuth, requirePerm, rolePerms, SUPER_ROLES, hashPassword, passwordPolicyError } = require("../security");
 const { ensureAuthSchema } = require("../auth-schema");
+const { scopedUserIds } = require("../workforce-scope");
 
 const router = express.Router();
 const safeUser = (u) => {
   const { password_hash, ...rest } = u;
   return rest;
 };
+
+async function assertCanManageTarget(req, target) {
+  if (!target) throw new HttpError(404, "Employee not found");
+  if (target.id === req.user.id) return;
+  if (req.role.name === "Super Admin") return;
+
+  const targetRole = target.role_id
+    ? await db.one("SELECT id,name,access_level FROM roles WHERE id = $1", [target.role_id])
+    : null;
+  if (targetRole?.name === "Super Admin")
+    throw new HttpError(403, "Only a Super Admin can manage a Super Admin account");
+
+  const callerLevel = Number(req.accessLevel || 99);
+  const targetLevel = Number(target.access_level || targetRole?.access_level || 99);
+  if (targetLevel <= callerLevel)
+    throw new HttpError(403, "You cannot manage an account at your level or above");
+
+  if (!SUPER_ROLES.has(req.role.name)) {
+    const visible = await scopedUserIds(req);
+    if (!visible?.includes(Number(target.id)))
+      throw new HttpError(403, "This employee is outside your Workforce OS scope");
+  }
+}
 
 router.get("/users/:id/profile", requireAuth, async (req, res, next) => {
   try {
@@ -22,6 +46,8 @@ router.get("/users/:id/profile", requireAuth, async (req, res, next) => {
 
     const user = await db.one("SELECT * FROM users WHERE id = $1 AND deleted_at IS NULL", [id]);
     if (!user) throw new HttpError(404, "Employee not found");
+    if (!isSelf) await assertCanManageTarget(req, user);
+
     const role = user.role_id ? await db.one("SELECT id, name FROM roles WHERE id = $1", [user.role_id]) : null;
     const team = user.team_id ? await db.one("SELECT id, name FROM teams WHERE id = $1", [user.team_id]) : null;
     const [leadCount, taskCount, dealCount, followupCount] = await Promise.all([
@@ -52,10 +78,12 @@ router.post("/users/:id/reset-password", requirePerm("employees", "edit"), async
     const password = String(req.body?.password || "");
     if (!Number.isFinite(id)) throw new HttpError(422, "Invalid employee id");
     if (id === req.user.id) throw new HttpError(400, "Use Change Password for your own account");
-    if (password.length < 8) throw new HttpError(422, "Temporary password must be at least 8 characters");
+
+    const policyError = passwordPolicyError(password);
+    if (policyError) throw new HttpError(422, `Temporary ${policyError.toLowerCase()}`);
 
     const user = await db.one("SELECT * FROM users WHERE id = $1 AND deleted_at IS NULL", [id]);
-    if (!user) throw new HttpError(404, "Employee not found");
+    await assertCanManageTarget(req, user);
 
     await db.tx(async (c) => {
       await c.query(
