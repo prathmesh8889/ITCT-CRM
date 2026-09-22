@@ -5,18 +5,13 @@ import { useStore } from "../store";
 import { DEMO_MODE } from "../lib/api";
 import { Btn, Field, Input } from "../components/ui";
 
-const demoAccounts = [
-  { label: "Super Admin", email: "admin@crm.local", pw: "Admin@123" },
-  { label: "Sales Manager", email: "rohit@itctcrm.in", pw: "Admin@123" },
-  { label: "Sales Executive", email: "rahul@itctcrm.in", pw: "Sales@123" },
-  { label: "Accountant", email: "neha@itctcrm.in", pw: "Sales@123" },
-];
+const demoAccounts: Array<{ label: string; email: string; pw: string }> = [];
 
 export default function Login() {
   const { login, toast } = useStore();
   const nav = useNavigate();
-  const [email, setEmail] = useState(DEMO_MODE ? "admin@crm.local" : "");
-  const [pw, setPw] = useState(DEMO_MODE ? "Admin@123" : "");
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("");
   const [show, setShow] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);

@@ -4,20 +4,41 @@
 require("dotenv").config();
 const crypto = require("crypto");
 
+const nodeEnv = process.env.NODE_ENV || "development";
+const isProduction = nodeEnv === "production";
+
 const config = {
+  nodeEnv,
+  isProduction,
   port: Number(process.env.PORT || 8000),
-  databaseUrl: process.env.DATABASE_URL || "postgresql://postgres:postgres@localhost:5432/itct_crm",
+  databaseUrl: process.env.DATABASE_URL || (isProduction ? "" : "postgresql://postgres:postgres@localhost:5432/itct_crm"),
   autoMigrate: (process.env.AUTO_MIGRATE || "true") === "true",
-  jwtSecret: process.env.JWT_SECRET || "dev-only-change-me",
+  jwtSecret: process.env.JWT_SECRET || (isProduction ? "" : "dev-only-change-me"),
+  jwtIssuer: "itct-crm",
+  jwtAudience: "itct-crm-users",
   accessMinutes: Number(process.env.ACCESS_TOKEN_EXPIRE_MINUTES || 60),
   refreshDays: Number(process.env.REFRESH_TOKEN_EXPIRE_DAYS || 7),
-  corsOrigins: (process.env.CORS_ORIGINS || "http://localhost:5173,http://127.0.0.1:5173").split(",").map((s) => s.trim()),
+  corsOrigins: (process.env.CORS_ORIGINS || (isProduction ? "" : "http://localhost:5173,http://127.0.0.1:5173"))
+    .split(",").map((s) => s.trim()).filter(Boolean),
+  enableDemoWorkforce: String(process.env.ENABLE_DEMO_WORKFORCE || "false").toLowerCase() === "true",
   ollamaUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
   ollamaModel: process.env.OLLAMA_MODEL || "qwen3",
   uploadDir: process.env.UPLOAD_DIR || "uploads",
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB || 10),
   version: "2.0.0",
 };
+
+function assertProductionConfig() {
+  if (!config.isProduction) return;
+  const errors = [];
+  if (!config.databaseUrl) errors.push("DATABASE_URL is required");
+  if (!config.jwtSecret || config.jwtSecret === "dev-only-change-me" || config.jwtSecret.length < 48)
+    errors.push("JWT_SECRET must be a unique random secret of at least 48 characters");
+  if (!config.corsOrigins.length) errors.push("CORS_ORIGINS must contain at least one trusted HTTPS frontend origin");
+  if (config.corsOrigins.some((o) => o === "*" || !o.startsWith("https://")))
+    errors.push("CORS_ORIGINS must use explicit HTTPS origins only");
+  if (errors.length) throw new Error(`Unsafe production configuration: ${errors.join("; ")}`);
+}
 
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -105,5 +126,5 @@ const toCSV = (rows) => {
 
 const sha256 = (s) => crypto.createHash("sha256").update(s).digest("hex");
 
-module.exports = { config, HttpError, money, computeTotals, nextCode, normPhone, normDomain,
+module.exports = { config, assertProductionConfig, HttpError, money, computeTotals, nextCode, normPhone, normDomain,
                    normName, validateLead, parseCSV, toCSV, sha256 };

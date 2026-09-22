@@ -110,6 +110,8 @@ router.get("/calendar/availability", requireAuth, async (req, res, next) => {
         googleBusy = await getGoogleBusyIntervals(date, dayStart, dayEnd);
       } catch (e) {
         googleError = e.message || "Google Calendar availability check failed";
+        console.error("[calendar] Google availability check failed:", googleError);
+        throw new HttpError(503, "Calendar availability could not be verified. Please retry.");
       }
     }
 
@@ -206,7 +208,8 @@ router.post("/calendar/meetings", requirePerm("meetings", "create"), async (req,
         }
       } catch (e) {
         if (e instanceof HttpError) throw e;
-        console.error("[calendar] Google free/busy check failed; booking will continue locally:", e.message);
+        console.error("[calendar] Google free/busy check failed; booking blocked:", e.message);
+        throw new HttpError(503, "Calendar availability could not be verified. Please retry.");
       }
     }
 

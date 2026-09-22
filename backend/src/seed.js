@@ -1,10 +1,11 @@
 /**
  * Production bootstrap after Workforce OS Step 3.
- * Creates only the technical L1/L2 identities plus the approved 56 L3-L6
- * Workforce roles. Legacy CRM roles are never recreated by the seed command.
+ * Creates approved system roles and, only on an empty database, one bootstrap
+ * Super Admin from environment variables. No production credential is stored
+ * in source control.
  */
 const { db, initSchema } = require("./db");
-const { hashPassword } = require("./security");
+const { hashPassword, passwordPolicyError } = require("./security");
 const { ensureAuthSchema } = require("./auth-schema");
 const { ensureAccessLevelSchema } = require("./access-levels");
 const { ensureOrganizationSchema } = require("./organization-schema");
@@ -32,20 +33,28 @@ async function main() {
 
   const existingUsers = await db.one("SELECT COUNT(*)::int AS n FROM users WHERE deleted_at IS NULL");
   if (!existingUsers?.n) {
+    const email = String(process.env.BOOTSTRAP_ADMIN_EMAIL || "").trim().toLowerCase();
+    const password = String(process.env.BOOTSTRAP_ADMIN_PASSWORD || "");
+    if (!/^\S+@\S+\.\S+$/.test(email))
+      throw new Error("BOOTSTRAP_ADMIN_EMAIL is required and must be a valid email when creating the first user");
+    const passwordError = passwordPolicyError(password);
+    if (passwordError)
+      throw new Error(`BOOTSTRAP_ADMIN_PASSWORD: ${passwordError}`);
+
     const superRole = await db.one("SELECT id FROM roles WHERE name = 'Super Admin'");
     await db.query(
       `INSERT INTO users
          (name, email, phone, password_hash, department, designation, role_id,
           is_sales, active, color, access_level, must_change_password)
-       VALUES ('Super Admin','admin@crm.local','',$1,'','Super Admin',$2,FALSE,TRUE,'#0F766E',1,TRUE)`,
-      [hashPassword("Admin@123"), superRole.id],
+       VALUES ('Super Admin',$1,'',$2,'','Super Admin',$3,FALSE,TRUE,'#0F766E',1,TRUE)`,
+      [email, hashPassword(password), superRole.id],
     );
-    console.log("[bootstrap] Super Admin created: admin@crm.local / Admin@123 — change this password immediately");
+    console.log(`[bootstrap] Super Admin created for ${email}; password change required on first login`);
   } else {
-    console.log(`[bootstrap] ${existingUsers.n} existing user(s); no sample users created`);
+    console.log(`[bootstrap] ${existingUsers.n} existing user(s); no bootstrap user created`);
   }
 
-  console.log("[bootstrap] Workforce OS roles ready: 2 global identities + 56 approved department roles; no demo business data created");
+  console.log("[bootstrap] Workforce OS roles ready; no demo business data created");
   await db.end();
 }
 

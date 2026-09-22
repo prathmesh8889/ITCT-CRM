@@ -8,7 +8,7 @@ Conversion → Quotation → Invoice → Payment → Reports & Analytics**
 Stack: **React + Vite + TypeScript + Tailwind** frontend · **Node.js + Express + PostgreSQL** backend ·
 JWT auth with refresh rotation · role-based access control with record ownership · optional Ollama AI.
 
-> Owner: **Kautuk Ade** · Super Admin login: `admin@crm.local` / `Admin@123` — *change in production.*
+> Production credentials are never stored in this repository.
 
 ---
 
@@ -49,18 +49,12 @@ unreachable the app shows a **“CRM server is unavailable”** screen with Retr
 writes business data to the browser. An explicitly labelled *demo workspace* (browser-only) is
 available from that screen or via `VITE_DEMO_MODE=true`.
 
-## Demo logins
+## Authentication
 
-| Role | Email | Password |
-| --- | --- | --- |
-| Super Admin (Kautuk Ade) | `admin@crm.local` | `Admin@123` |
-| Admin | `kavya@itctcrm.in` | `Admin@123` |
-| Sales Manager | `rohit@itctcrm.in` | `Admin@123` |
-| Sales Executives | `rahul@itctcrm.in` · `priya@…` · `amit@…` · `sneha@…` · `vikram@itctcrm.in` | `Sales@123` |
-| Accountant | `neha@itctcrm.in` | `Sales@123` |
-
-Sales Executives only ever see **their own** leads/deals/tasks/follow-ups/customers — enforced in
-the backend (403 on direct ID access), not just hidden in the UI.
+Production accounts are created and managed in PostgreSQL. For a brand-new empty database,
+set `BOOTSTRAP_ADMIN_EMAIL` and a strong `BOOTSTRAP_ADMIN_PASSWORD` in the backend environment,
+run `npm run seed` once, then remove/rotate the bootstrap password variable. The first bootstrap
+account is forced to change its password on first login. Never put real credentials in source control.
 
 ## Ollama (optional AI)
 ```cmd
@@ -116,10 +110,12 @@ git push -u origin main            :: add --force only if remote history diverge
 Never commit `backend/.env`, `.env`, `node_modules/`, or `backend/uploads/` (all gitignored).
 
 ## Production deployment
-- **Frontend** — any static host (Vercel/Netlify): set `VITE_API_URL=https://YOUR-API/api`, build with `npm run build`.
-- **Backend** — Railway/Render/VPS: set `DATABASE_URL` (managed PostgreSQL), a strong `JWT_SECRET`,
-  and `CORS_ORIGINS` to your frontend domain. Run `npm run seed` once, then `npm start`.
-- Move the failed-login throttle and discovery worker to Redis/queue for multi-instance scale.
+- **Frontend** — set `VITE_API_URL=https://YOUR-API/api`, build with `npm run build`, and run `npm start`.
+  The included production server adds CSP, HSTS, anti-framing, no-sniff, referrer and permissions headers.
+- **Backend** — set `NODE_ENV=production`, managed `DATABASE_URL`, a unique random `JWT_SECRET` of at least
+  48 characters, and explicit HTTPS `CORS_ORIGINS`. Production startup fails closed if these are unsafe.
+- Keep `ENABLE_DEMO_WORKFORCE=false` in production. Demo login accounts are disabled automatically.
+- Move the failed-login throttle and discovery worker to Redis/queue before scaling to multiple backend replicas.
 
 ## Troubleshooting
 | Symptom | Fix |

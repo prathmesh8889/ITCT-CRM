@@ -6,7 +6,7 @@
 const express = require("express");
 const { db } = require("../db");
 const { HttpError } = require("../core");
-const { requirePerm, hashPassword } = require("../security");
+const { requirePerm, hashPassword, passwordPolicyError } = require("../security");
 const { ensureAuthSchema } = require("../auth-schema");
 const { canAssignAccessLevel } = require("../access-levels");
 const { ensureWorkforceRoleSchema } = require("../workforce-role-schema");
@@ -28,7 +28,8 @@ router.post("/users", requirePerm("employees", "create"), async (req, res, next)
 
     if (!name || !email) throw new HttpError(422, "Name and email are required");
     if (!/^\S+@\S+\.\S+$/.test(email)) throw new HttpError(422, "Enter a valid email address");
-    if (password.length < 8) throw new HttpError(422, "Temporary password must be at least 8 characters");
+    const passwordError = passwordPolicyError(password);
+    if (passwordError) throw new HttpError(422, `Temporary ${passwordError.toLowerCase()}`);
     if (!b.role_id) throw new HttpError(422, "Please select an employee role");
 
     const role = await db.one("SELECT * FROM roles WHERE id = $1", [Number(b.role_id)]);

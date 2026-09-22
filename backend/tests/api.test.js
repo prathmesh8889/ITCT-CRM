@@ -7,7 +7,7 @@ const { test } = require("node:test");
 const assert = require("node:assert");
 
 const { money, computeTotals, validateLead, normPhone, normDomain, parseCSV, toCSV } = require("../src/core");
-const { rolePerms } = require("../src/security");
+const { rolePerms, passwordPolicyError } = require("../src/security");
 
 // ---------------- money math (backend authoritative) ----------------
 test("money rounds to paise", () => {
@@ -75,6 +75,12 @@ test("matrix roles are checked strictly", () => {
   assert.ok(!rolePerms("Sales Executive", perms, "invoices", "view"));
 });
 
+test("password policy requires long mixed passwords", () => {
+  assert.ok(passwordPolicyError("short"));
+  assert.ok(passwordPolicyError("alllowercasebutlong"));
+  assert.strictEqual(passwordPolicyError("Strong-Example-42!"), null);
+});
+
 // ---------------- guarded integration tests (need TEST_DATABASE_URL) ----------------
 const TEST_DB = process.env.TEST_DATABASE_URL;
 if (TEST_DB) {
@@ -99,9 +105,15 @@ if (TEST_DB) {
     assert.strictEqual(health.status, 200);
     assert.strictEqual(health.body.database, "connected");
 
-    // login
-    const login = await j("/auth/login", { method: "POST", body: JSON.stringify({ email: "admin@crm.local", password: "Admin@123" }) });
-    assert.strictEqual(login.status, 200, "run `npm run seed` against TEST_DATABASE_URL first");
+    // login credentials are supplied only by the integration-test environment.
+    const testEmail = process.env.TEST_ADMIN_EMAIL;
+    const testPassword = process.env.TEST_ADMIN_PASSWORD;
+    if (!testEmail || !testPassword) {
+      t.skip("Set TEST_ADMIN_EMAIL and TEST_ADMIN_PASSWORD for authenticated integration coverage");
+      return;
+    }
+    const login = await j("/auth/login", { method: "POST", body: JSON.stringify({ email: testEmail, password: testPassword }) });
+    assert.strictEqual(login.status, 200, "seed the TEST_DATABASE_URL with the test admin first");
     const token = login.body.access_token;
     const refresh = login.body.refresh_token;
     const H = { Authorization: `Bearer ${token}` };

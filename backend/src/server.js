@@ -2,7 +2,7 @@
 const express = require("express");
 const cors = require("cors");
 const { db, initSchema } = require("./db");
-const { config, HttpError } = require("./core");
+const { config, assertProductionConfig, HttpError } = require("./core");
 const { sweepOverdueInvoices } = require("./engines");
 const { cleanupDemoData } = require("./cleanup-demo");
 const { seedDemoWorkforce } = require("./demo-workforce-seed");
@@ -18,11 +18,16 @@ const { router: crmRoutes, startDiscoveryWorker } = require("./routes/crm");
 const app = express();
 app.set("trust proxy", true);
 app.disable("x-powered-by");
+app.disable("etag");
 app.use((_req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "no-referrer");
   res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Pragma", "no-cache");
+  if (config.isProduction) res.setHeader("Strict-Transport-Security", "max-age=31536000");
   next();
 });
 app.use(cors({ origin: config.corsOrigins, credentials: true }));
@@ -81,6 +86,7 @@ app.use((err, req, res, _next) => {
 });
 
 async function main() {
+  assertProductionConfig();
   if (config.autoMigrate) {
     try {
       await initSchema();
@@ -107,10 +113,19 @@ async function main() {
     const result = await cleanupDemoData();
     console.log(`[boot] demo cleanup: ${JSON.stringify(result)}`);
   } catch (e) { console.error("[boot] demo cleanup failed (continuing):", e.message); }
-  try {
-    const demo = await seedDemoWorkforce();
-    console.log(`[boot] workforce demo: ${JSON.stringify(demo)}`);
-  } catch (e) { console.error("[boot] workforce demo seed failed (continuing):", e.message); }
+  if (config.enableDemoWorkforce) {
+    try {
+      const demo = await seedDemoWorkforce();
+      console.log(`[boot] workforce demo: ${JSON.stringify(demo)}`);
+    } catch (e) { console.error("[boot] workforce demo seed failed (continuing):", e.message); }
+  } else if (config.isProduction) {
+    try {
+      const disabled = await db.query(
+        "UPDATE users SET active=FALSE WHERE active=TRUE AND lower(email) LIKE 'demo.%@workforce.invalid'"
+      );
+      if (disabled.rowCount) console.log(`[boot] disabled ${disabled.rowCount} production demo login(s)`);
+    } catch (e) { console.error("[boot] demo-login disable failed (continuing):", e.message); }
+  }
   try {
     const swept = await sweepOverdueInvoices();
     if (swept) console.log(`[boot] invoice sweep marked ${swept} invoice(s) overdue`);

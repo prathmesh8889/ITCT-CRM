@@ -5,7 +5,7 @@ const express = require("express");
 const jwt = require("jsonwebtoken");
 const { db } = require("../db");
 const { config, HttpError, sha256 } = require("../core");
-const { hashPassword, verifyPassword, signAccess, signRefresh, newRefreshHash, requireAuth } = require("../security");
+const { hashPassword, verifyPassword, passwordPolicyError, signAccess, signRefresh, verifyJwt, newRefreshHash, requireAuth } = require("../security");
 const { ensureAuthSchema } = require("../auth-schema");
 
 const router = express.Router();
@@ -70,7 +70,7 @@ router.post("/refresh", async (req, res, next) => {
     await ensureAuthSchema();
     const token = String(req.body?.refresh_token || "");
     let payload;
-    try { payload = jwt.verify(token, config.jwtSecret); } catch { throw new HttpError(401, "Invalid refresh token"); }
+    try { payload = verifyJwt(token); } catch { throw new HttpError(401, "Invalid refresh token"); }
     if (payload.type !== "refresh") throw new HttpError(401, "Invalid token type");
     const row = await db.one("SELECT * FROM refresh_tokens WHERE token_hash = $1", [sha256(token)]);
     if (!row || row.expires_at < new Date()) throw new HttpError(401, "Refresh token expired");
@@ -111,8 +111,8 @@ router.post("/change-password", requireAuth, async (req, res, next) => {
     const { old_password, new_password } = req.body || {};
     if (!verifyPassword(String(old_password || ""), req.user.password_hash))
       throw new HttpError(422, "Current password is incorrect");
-    if (!new_password || String(new_password).length < 8)
-      throw new HttpError(422, "New password must be at least 8 characters");
+    const policyError = passwordPolicyError(new_password);
+    if (policyError) throw new HttpError(422, policyError);
     if (String(old_password || "") === String(new_password))
       throw new HttpError(422, "New password must be different from the temporary/current password");
     await db.query("UPDATE users SET password_hash = $1, must_change_password = FALSE WHERE id = $2", [hashPassword(new_password), req.user.id]);
