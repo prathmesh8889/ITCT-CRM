@@ -9,18 +9,39 @@ const { db } = require("./db");
 const { ensureAccessLevelSchema, effectiveAccessLevel, isValidAccessLevel } = require("./access-levels");
 const { scopedUserIds } = require("./workforce-scope");
 
-const hashPassword = (plain) => bcrypt.hashSync(plain, 10);
+const hashPassword = (plain) => bcrypt.hashSync(plain, 12);
 const verifyPassword = (plain, hash) => { try { return bcrypt.compareSync(plain, hash); } catch { return false; } };
+
+function passwordPolicyError(value) {
+  const password = String(value || "");
+  if (password.length < 12) return "Password must be at least 12 characters";
+  if (password.length > 128) return "Password must be 128 characters or fewer";
+  if (!/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password))
+    return "Password must include uppercase, lowercase, number, and symbol";
+  return null;
+}
+
+const jwtOptions = (expiresIn) => ({
+  expiresIn,
+  issuer: config.jwtIssuer,
+  audience: config.jwtAudience,
+  algorithm: "HS256",
+});
+const verifyJwt = (token) => jwt.verify(token, config.jwtSecret, {
+  algorithms: ["HS256"],
+  issuer: config.jwtIssuer,
+  audience: config.jwtAudience,
+});
 
 const signAccess = (user, roleName) =>
   jwt.sign({ sub: String(user.id), role: roleName, type: "access" }, config.jwtSecret,
-           { expiresIn: `${config.accessMinutes}m` });
+           jwtOptions(`${config.accessMinutes}m`));
 const signRefresh = (user) =>
   jwt.sign({
     sub: String(user.id),
     type: "refresh",
     nonce: crypto.randomBytes(16).toString("hex"),
-  }, config.jwtSecret, { expiresIn: `${config.refreshDays}d` });
+  }, config.jwtSecret, jwtOptions(`${config.refreshDays}d`));
 const newRefreshHash = () => sha256(crypto.randomBytes(32).toString("hex"));
 
 // ---------------- RBAC catalog ----------------
@@ -61,7 +82,7 @@ async function requireAuth(req, _res, next) {
     const token = header.startsWith("Bearer ") ? header.slice(7) : null;
     if (!token) throw new HttpError(401, "Not authenticated");
     let payload;
-    try { payload = jwt.verify(token, config.jwtSecret); } catch { throw new HttpError(401, "Invalid or expired token"); }
+    try { payload = verifyJwt(token); } catch { throw new HttpError(401, "Invalid or expired token"); }
     if (payload.type !== "access") throw new HttpError(401, "Invalid token type");
 
     await ensureAccessLevelSchema();
@@ -126,7 +147,7 @@ const ensureQuotation = (req, id) => ensureRow(req, "quotations", id, "created_b
 const ensureInvoice = (req, id) => ensureRow(req, "invoices", id, "created_by");
 
 module.exports = {
-  hashPassword, verifyPassword, signAccess, signRefresh, newRefreshHash,
+  hashPassword, verifyPassword, passwordPolicyError, signAccess, signRefresh, verifyJwt, newRefreshHash,
   MODULES, PERMS, SUPER_ROLES, rolePerms, requireAuth, requirePerm, isWide,
   applyOwnership, ensureLead, ensureCustomer, ensureDeal, ensureFollowup, ensureTask,
   ensureQuotation, ensureInvoice,
