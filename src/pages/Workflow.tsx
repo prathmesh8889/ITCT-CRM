@@ -302,7 +302,6 @@ export function TasksPage() {
 // ================= MEETINGS =================
 export function MeetingsPage() {
   const { user, can, toast } = useStore();
-  const nav = useNavigate();
   const d = useDB();
   const [modal, setModal] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -348,7 +347,7 @@ export function MeetingsPage() {
     <div className="mx-auto max-w-[1000px] p-4 md:p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div><h1 className="hd text-[22px]">Meetings</h1><p className="text-[12.5px] text-ink-500">{upcoming.filter((m) => m.date === today).length} today · {upcoming.length} upcoming</p></div>
-        {can("meetings", "create") && <Btn size="sm" onClick={() => nav("/calendar")}><Plus size={14} /> Schedule meeting</Btn>}
+        {can("meetings", "create") && <Btn size="sm" onClick={() => { setMf({ date: addDaysISO(1), start: "11:00", end: "12:00", location: "Google Meet" }); setEditId(null); setModal(true); }}><Plus size={14} /> Schedule meeting</Btn>}
       </div>
       <h3 className="hd mb-2 text-[14px]">Upcoming</h3>
       <div className="space-y-2">{upcoming.map((m) => <MeetRow key={m.id} m={m} />)}{upcoming.length === 0 && <EmptyState icon={<CalendarDays size={24} />} title="No upcoming meetings" />}</div>
