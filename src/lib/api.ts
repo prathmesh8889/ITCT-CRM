@@ -180,6 +180,16 @@ export const dealApi = {
   moveStage: (id: number, stage_id: string) => api.patch(`/deals/${id}/stage`, { stage_id }),
   remove: (id: number) => api.delete(`/deals/${id}`),
   stages: () => api.get("/deals/stages"),
+  createStage: (name: string) => api.post("/deals/stages", { name }),
+  removeStage: (id: number) => api.delete(`/deals/stages/${id}`),
+};
+export const crmCatalogApi = {
+  statuses: () => api.get("/lead-statuses-config"),
+  createStatus: (name: string) => api.post("/lead-statuses-config", { name }),
+  removeStatus: (id: number) => api.delete(`/lead-statuses-config/${id}`),
+  sources: () => api.get("/lead-sources-config"),
+  createSource: (name: string) => api.post("/lead-sources-config", { name }),
+  removeSource: (id: number) => api.delete(`/lead-sources-config/${id}`),
 };
 
 // ---------- workflow ----------
