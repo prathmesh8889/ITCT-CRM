@@ -183,10 +183,13 @@ export const taskApi = {
   list: (q?: Query) => api.get<Paged<unknown>>("/tasks", { params: q }),
   create: (b: unknown) => api.post("/tasks", b),
   update: (id: number, b: unknown) => api.patch(`/tasks/${id}`, b),
+  remove: (id: number) => api.delete(`/tasks/${id}`),
 };
 export const meetingApi = {
   list: (q?: Query) => api.get<Paged<unknown>>("/meetings", { params: q }),
   create: (b: unknown) => api.post("/meetings", b),
+  update: (id: number, b: unknown) => api.patch(`/meetings/${id}`, b),
+  remove: (id: number) => api.delete(`/meetings/${id}`),
 };
 export const callApi = { create: (b: unknown) => api.post("/calls", b) };
 
@@ -195,12 +198,14 @@ export const productApi = {
   list: () => api.get("/products"),
   create: (b: unknown) => api.post("/products", b),
   update: (id: number, b: unknown) => api.patch(`/products/${id}`, b),
+  remove: (id: number) => api.delete(`/products/${id}`),
 };
 export const quotationApi = {
   list: (q?: Query) => api.get<Paged<unknown>>("/quotations", { params: q }),
   get: (id: number) => api.get(`/quotations/${id}`),
   create: (b: unknown) => api.post("/quotations", b),
   update: (id: number, b: unknown) => api.patch(`/quotations/${id}`, b),
+  remove: (id: number) => api.delete(`/quotations/${id}`),
   convertToInvoice: (id: number) => api.post(`/quotations/${id}/convert-to-invoice`),
 };
 export const invoiceApi = {
@@ -215,6 +220,7 @@ export const paymentApi = { list: (q?: Query) => api.get<Paged<unknown>>("/payme
 export const expenseApi = {
   list: (q?: Query) => api.get<Paged<unknown>>("/expenses", { params: q }),
   create: (b: unknown) => api.post("/expenses", b),
+  remove: (id: number) => api.delete(`/expenses/${id}`),
 };
 
 // ---------- admin ----------
