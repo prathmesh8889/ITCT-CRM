@@ -149,6 +149,8 @@ export const customerApi = {
   create: (b: unknown) => api.post("/customers", b),
   update: (id: number, b: unknown) => api.patch(`/customers/${id}`, b),
   remove: (id: number) => api.delete(`/customers/${id}`),
+  notes: () => api.get("/customer-notes"),
+  addNote: (id: number, body: string) => api.post(`/customers/${id}/notes`, { body }),
 };
 export const companyApi = {
   list: (q?: Query) => api.get<Paged<unknown>>("/companies", { params: q }),
