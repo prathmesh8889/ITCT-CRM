@@ -79,7 +79,8 @@ export function fromApiCustomer(c: ApiCustomer): Customer {
   return {
     id: String(c.id), name: c.name, company: c.company, phone: c.phone, email: c.email,
     whatsapp: c.whatsapp, gstin: c.gst_number, pan: c.pan_number,
-    billingAddress: "", shippingAddress: "", city: c.city, state: c.state, country: "India",
+    billingAddress: c.billing_address || "", shippingAddress: c.shipping_address || "",
+    city: c.city, state: c.state, country: c.country || "India",
     managerId: s(c.account_manager_id), status: c.status as Customer["status"],
     notes: c.notes, leadId: c.lead_id ? String(c.lead_id) : undefined, createdAt: c.created_at,
   };
