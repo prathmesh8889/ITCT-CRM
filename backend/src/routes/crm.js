@@ -743,9 +743,18 @@ router.patch("/tasks/:id", requirePerm("tasks", "edit"), async (req, res, next) 
     const allowed = ["title", "description", "status", "priority", "due_date", "assigned_to_id"];
     const patch = Object.entries(req.body || {}).filter(([k, v]) => allowed.includes(k) && v !== undefined);
     if (patch.length) {
-      const sets = patch.map(([k], i) => `${k} = $${i + 1}`).join(", ");
-      await db.query(`UPDATE tasks SET ${sets} WHERE id = $${patch.length + 1}`, [...patch.map(([, v]) => v), Number(req.params.id)]);
+      const sets = patch.map(([k], i) => `${k} = ${i + 1}`).join(", ");
+      await db.query(`UPDATE tasks SET ${sets} WHERE id = ${patch.length + 1}`, [...patch.map(([, v]) => v), Number(req.params.id)]);
     }
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+router.delete("/tasks/:id", requirePerm("tasks", "delete"), async (req, res, next) => {
+  try {
+    const task = await ensureTask(req, Number(req.params.id));
+    await db.query("DELETE FROM tasks WHERE id = $1", [task.id]);
+    await activity(req.user.id, "Task Deleted", "tasks", task.id, { title: task.title });
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
@@ -771,6 +780,36 @@ router.post("/meetings", requirePerm("meetings", "create"), async (req, res, nex
        b.date, b.start_time || "10:00", b.end_time || "11:00", b.location || "", b.meeting_link || "", b.agenda || ""]);
     await activity(req.user.id, "Meeting Created", "meetings", r.rows[0].id, { title: b.title, date: b.date });
     res.status(201).json({ id: r.rows[0].id });
+  } catch (e) { next(e); }
+});
+
+router.patch("/meetings/:id", requirePerm("meetings", "edit"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const current = await db.one("SELECT * FROM meetings WHERE id = $1", [id]);
+    if (!current) throw new HttpError(404, "Meeting not found");
+    const allowed = ["title", "lead_id", "customer_id", "participants", "date", "start_time", "end_time",
+      "location", "meeting_link", "agenda", "notes", "outcome"];
+    const patch = Object.entries(req.body || {}).filter(([k, v]) => allowed.includes(k) && v !== undefined);
+    if (patch.length) {
+      const values = patch.map(([k, v]) => k === "participants" ? JSON.stringify(v || []) : v);
+      const sets = patch.map(([k], i) => `${k} = ${i + 1}`).join(", ");
+      await db.query(`UPDATE meetings SET ${sets} WHERE id = ${patch.length + 1}`, [...values, id]);
+    }
+    await activity(req.user.id, "Meeting Edited", "meetings", id);
+    const row = await db.one("SELECT * FROM meetings WHERE id = $1", [id]);
+    res.json({ ...row, date: row.date ? String(row.date).slice(0, 10) : null });
+  } catch (e) { next(e); }
+});
+
+router.delete("/meetings/:id", requirePerm("meetings", "delete"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const row = await db.one("SELECT * FROM meetings WHERE id = $1", [id]);
+    if (!row) throw new HttpError(404, "Meeting not found");
+    await db.query("DELETE FROM meetings WHERE id = $1", [id]);
+    await activity(req.user.id, "Meeting Deleted", "meetings", id, { title: row.title });
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
