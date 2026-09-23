@@ -90,7 +90,7 @@ export function toApiCustomer(c: Partial<Customer>): Record<string, unknown> {
   const map: [keyof Customer, string][] = [
     ["name", "name"], ["company", "company"], ["phone", "phone"], ["email", "email"],
     ["whatsapp", "whatsapp"], ["gstin", "gst_number"], ["pan", "pan_number"],
-    ["city", "city"], ["state", "state"], ["status", "status"], ["notes", "notes"],
+    ["city", "city"], ["state", "state"], ["country", "country"], ["status", "status"], ["notes", "notes"],
     ["billingAddress", "billing_address"], ["shippingAddress", "shipping_address"],
   ];
   for (const [k, api] of map) if (c[k] !== undefined) out[api] = c[k];
