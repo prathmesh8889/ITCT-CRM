@@ -1,22 +1,57 @@
 import { useState } from "react";
 import { Plus, Pencil, Package, Trash2 } from "lucide-react";
 import { useStore } from "../store";
-import { mutate, useDB, uid } from "../lib/db";
-import { logAct, inr } from "../lib/services";
+import { mutate, useDB } from "../lib/db";
+import { inr } from "../lib/services";
 import type { Product } from "../lib/types";
+import { productApi } from "../lib/api";
 import { Btn, Badge, Modal, Field, Input, Select, Textarea, EmptyState, Money, Toggle } from "../components/ui";
 
 export default function Products() {
-  const { user, can, toast } = useStore();
+  const { can, toast } = useStore();
   const d = useDB();
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState<Product | null>(null);
   const [f, setF] = useState<Partial<Product>>({ unit: "project", gstPct: 18, active: true, category: "Development" });
-  const save = () => {
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
     if (!f.name?.trim() || !f.sku?.trim()) { toast("Name and SKU are required", "err"); return; }
-    if (edit) { mutate((db) => { const p = db.products.find((x) => x.id === edit.id); if (p) Object.assign(p, f); }); toast("Product updated"); }
-    else { mutate((db) => db.products.unshift({ id: uid(), name: f.name!, sku: f.sku!, category: f.category || "General", description: f.description || "", unit: f.unit || "unit", price: f.price || 0, gstPct: f.gstPct ?? 18, active: f.active ?? true })); logAct("product", "new", user!.id, "Product created", f.name); toast("Product added"); }
-    setModal(false); setEdit(null); setF({ unit: "project", gstPct: 18, active: true, category: "Development" });
+    setBusy(true);
+    try {
+      const body = {
+        name: f.name.trim(), sku: f.sku.trim(), category: f.category || "General",
+        description: f.description || "", unit: f.unit || "unit", unit_price: f.price || 0,
+        gst_percent: f.gstPct ?? 18, active: f.active ?? true,
+      };
+      const r = edit ? await productApi.update(Number(edit.id), body) : await productApi.create(body);
+      const p: any = r.data;
+      const row: Product = {
+        id: String(p.id), name: p.name, sku: p.sku, category: p.category || "General",
+        description: p.description || "", unit: p.unit || "unit", price: Number(p.unit_price) || 0,
+        gstPct: Number(p.gst_percent) || 0, active: !!p.active,
+      };
+      mutate((db) => {
+        const index = db.products.findIndex((x) => x.id === row.id);
+        if (index >= 0) db.products[index] = row; else db.products.unshift(row);
+      });
+      toast(edit ? "Product updated" : "Product added", "ok");
+      setModal(false); setEdit(null); setF({ unit: "project", gstPct: 18, active: true, category: "Development" });
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not save product", "err"); }
+    finally { setBusy(false); }
+  };
+  const removeProduct = async (p: Product) => {
+    if (!window.confirm(`Delete ${p.name}?`)) return;
+    try {
+      await productApi.remove(Number(p.id));
+      mutate((db) => { db.products = db.products.filter((x) => x.id !== p.id); });
+      toast("Product deleted", "warn");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not delete product", "err"); }
+  };
+  const setActive = async (p: Product, active: boolean) => {
+    try {
+      await productApi.update(Number(p.id), { active });
+      mutate((db) => { const x = db.products.find((y) => y.id === p.id); if (x) x.active = active; });
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not update product", "err"); }
   };
   return (
     <div className="mx-auto max-w-[1100px] p-4 md:p-6">
@@ -40,11 +75,11 @@ export default function Products() {
               {can("products", "edit") && (
                 <div className="flex gap-1">
                   <button className="rounded p-1 text-ink-400 hover:text-brand-600" onClick={() => { setEdit(p); setF(p); setModal(true); }}><Pencil size={13} /></button>
-                  {can("products", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => { if (window.confirm(`Delete ${p.name}?`)) { mutate((db) => { db.products = db.products.filter((x) => x.id !== p.id); }); toast("Product deleted", "warn"); } }}><Trash2 size={13} /></button>}
+                  {can("products", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => void removeProduct(p)}><Trash2 size={13} /></button>}
                 </div>
               )}
             </div>
-            {can("products", "edit") && <div className="mt-2 border-t border-ink-100 pt-2 dark:border-ink-800"><Toggle on={p.active} onChange={(v) => mutate((db) => { const x = db.products.find((y) => y.id === p.id); if (x) x.active = v; })} label={p.active ? "Visible in document builder" : "Hidden from document builder"} /></div>}
+            {can("products", "edit") && <div className="mt-2 border-t border-ink-100 pt-2 dark:border-ink-800"><Toggle on={p.active} onChange={(v) => void setActive(p, v)} label={p.active ? "Visible in document builder" : "Hidden from document builder"} /></div>}
           </div>
         ))}
       </div>
@@ -61,7 +96,7 @@ export default function Products() {
             <Field label="Description" className="col-span-2"><Textarea value={f.description || ""} onChange={(e) => setF((p) => ({ ...p, description: e.target.value }))} /></Field>
           </div>
           <div className="mt-3"><Toggle on={f.active ?? true} onChange={(v) => setF((p) => ({ ...p, active: v }))} label="Active" /></div>
-          <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setModal(false)}>Cancel</Btn><Btn onClick={save}>{edit ? "Save" : "Add product"}</Btn></div>
+          <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setModal(false)}>Cancel</Btn><Btn loading={busy} onClick={() => void save()}>{edit ? "Save" : "Add product"}</Btn></div>
         </Modal>
       )}
       {inr(0) === "" && <span />}
