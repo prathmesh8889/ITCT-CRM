@@ -1,29 +1,67 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Plus, Search, Pencil, Trash2, Phone, MessageCircle, Mail, Building2, Users, UserCircle2 } from "lucide-react";
+import { Plus, Search, Pencil, Phone, MessageCircle, Mail, Building2, Users, UserCircle2 } from "lucide-react";
 import { useStore } from "../store";
-import { mutate, useDB, uid } from "../lib/db";
-import { logAct, waLink, telLink, docTotals, paidFor, fmtD, inr, todayISO } from "../lib/services";
+import { mutate, useDB } from "../lib/db";
+import { waLink, telLink, docTotals, paidFor, fmtD, inr } from "../lib/services";
 import type { Customer, Company, Contact } from "../lib/types";
+import type { ApiCustomer } from "../lib/apiTypes";
+import { customerApi, companyApi, contactApi } from "../lib/api";
+import { fromApiCustomer, toApiCustomer } from "../lib/mappers";
 import { Btn, Badge, Modal, Drawer, Field, Input, Select, Textarea, Tabs, EmptyState, Avatar, statusTone, Money } from "../components/ui";
+
+const companyFromApi = (c: any): Company => ({
+  id: String(c.id), name: c.name || "", industry: c.industry || "", website: c.website || "",
+  phone: c.phone || "", email: c.email || "", city: c.city || "", state: c.state || "",
+  address: c.address || "", gstin: c.gst || "", notes: c.notes || "", createdAt: c.created_at,
+});
+const contactFromApi = (c: any): Contact => ({
+  id: String(c.id), name: `${c.first_name || ""} ${c.last_name || ""}`.trim(),
+  title: c.designation || "", companyId: c.company_id == null ? undefined : String(c.company_id),
+  phone: c.phone || "", email: c.email || "", whatsapp: c.whatsapp || "",
+  city: c.city || "", notes: c.notes || "", createdAt: c.created_at,
+});
+const splitName = (name: string) => {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return { first_name: parts.shift() || "", last_name: parts.join(" ") };
+};
 
 // ---------- customers ----------
 function CustomerModal({ initial, onDone, editing }: { initial: Partial<Customer>; onDone: () => void; editing: boolean }) {
-  const { user, toast } = useStore();
+  const { toast } = useStore();
   const d = useDB();
   const [f, setF] = useState(initial);
+  const [busy, setBusy] = useState(false);
   const set = (k: keyof Customer, v: unknown) => setF((p) => ({ ...p, [k]: v }));
-  const save = () => {
+  const save = async () => {
     if (!f.company?.trim()) { toast("Company name is required", "err"); return; }
-    if (editing && f.id) {
-      mutate((db) => { const c = db.customers.find((x) => x.id === f.id); if (c) Object.assign(c, f); });
-      logAct("customer", f.id, user!.id, "Customer updated", f.company);
-      toast("Customer updated");
-    } else {
-      mutate((db) => { db.customers.unshift({ id: uid(), name: f.name || "—", company: f.company!, phone: f.phone || "", email: f.email || "", whatsapp: f.whatsapp || f.phone || "", gstin: f.gstin || "", pan: f.pan || "", billingAddress: f.billingAddress || "", shippingAddress: f.shippingAddress || f.billingAddress || "", city: f.city || "", state: f.state || "", country: "India", managerId: f.managerId || null, status: (f.status as Customer["status"]) || "Active", notes: f.notes || "", createdAt: new Date().toISOString() }); });
-      toast("Customer created", "ok", f.company);
+    setBusy(true);
+    try {
+      const payload = toApiCustomer({
+        ...f,
+        name: f.name?.trim() || f.company.trim(),
+        company: f.company.trim(),
+        whatsapp: f.whatsapp || f.phone || "",
+        shippingAddress: f.shippingAddress || f.billingAddress || "",
+        country: f.country || "India",
+        status: (f.status as Customer["status"]) || "Active",
+      });
+      const r = editing && f.id
+        ? await customerApi.update(Number(f.id), payload)
+        : await customerApi.create(payload);
+      const row = fromApiCustomer(r.data as ApiCustomer);
+      mutate((db) => {
+        const index = db.customers.findIndex((x) => x.id === row.id);
+        if (index >= 0) db.customers[index] = row;
+        else db.customers.unshift(row);
+      });
+      toast(editing ? "Customer updated" : "Customer created", "ok", row.company);
+      onDone();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not save customer", "err");
+    } finally {
+      setBusy(false);
     }
-    onDone();
   };
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -38,16 +76,17 @@ function CustomerModal({ initial, onDone, editing }: { initial: Partial<Customer
       <Field label="Billing address" className="col-span-2"><Textarea value={f.billingAddress || ""} onChange={(e) => set("billingAddress", e.target.value)} /></Field>
       <Field label="Account manager"><Select value={f.managerId || ""} onChange={(e) => set("managerId", e.target.value || null)}><option value="">—</option>{d.users.filter((u) => u.isSales && u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></Field>
       <Field label="Status"><Select value={f.status || "Active"} onChange={(e) => set("status", e.target.value as Customer["status"])}><option>Active</option><option>Inactive</option><option>On Hold</option></Select></Field>
-      <div className="col-span-2 flex justify-end gap-2"><Btn variant="ghost" onClick={onDone}>Cancel</Btn><Btn onClick={save}>{editing ? "Save" : "Create customer"}</Btn></div>
+      <div className="col-span-2 flex justify-end gap-2"><Btn variant="ghost" onClick={onDone}>Cancel</Btn><Btn loading={busy} onClick={() => void save()}>{editing ? "Save" : "Create customer"}</Btn></div>
     </div>
   );
 }
 
 function CustomerDrawer({ id, onClose, onEdit }: { id: string; onClose: () => void; onEdit: () => void }) {
-  const { user } = useStore();
+  const { user, toast } = useStore();
   const d = useDB();
   const [tab, setTab] = useState("overview");
   const [note, setNote] = useState("");
+  const [noteBusy, setNoteBusy] = useState(false);
   const c = d.customers.find((x) => x.id === id);
   if (!c) return null;
   const deals = d.deals.filter((x) => x.customerId === c.id);
@@ -81,7 +120,17 @@ function CustomerDrawer({ id, onClose, onEdit }: { id: string; onClose: () => vo
               ))}
               <div className="card mt-3 p-3">
                 <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a note…" />
-                <div className="mt-2 flex justify-end"><Btn size="sm" disabled={!note.trim()} onClick={() => { mutate((db) => db.notes.unshift({ id: uid(), entityType: "customer", entityId: c.id, body: note, authorId: user!.id, createdAt: new Date().toISOString() })); setNote(""); }}>Save note</Btn></div>
+                <div className="mt-2 flex justify-end"><Btn size="sm" loading={noteBusy} disabled={!note.trim()} onClick={() => void (async () => {
+                  setNoteBusy(true);
+                  try {
+                    const r = await customerApi.addNote(Number(c.id), note.trim());
+                    const n: any = r.data;
+                    mutate((db) => db.notes.unshift({ id: String(n.id), entityType: "customer", entityId: String(n.entity_id), body: n.body || "", authorId: String(n.author_id || user!.id), createdAt: n.created_at }));
+                    setNote("");
+                    toast("Note saved", "ok");
+                  } catch (e) { toast(e instanceof Error ? e.message : "Could not save note", "err"); }
+                  finally { setNoteBusy(false); }
+                })()}>Save note</Btn></div>
               </div>
               {d.notes.filter((n) => n.entityId === c.id).map((n) => <div key={n.id} className="card mt-2 p-2.5 text-[12.5px] text-ink-600 dark:text-ink-300">{n.body}<div className="num mt-1 text-[10px] text-ink-400">{fmtD(n.createdAt)}</div></div>)}
             </div>
@@ -125,26 +174,56 @@ export default function Relations() {
   const [ctEdit, setCtEdit] = useState<Contact | null>(null);
   const [coForm, setCoForm] = useState<Partial<Company>>({});
   const [ctForm, setCtForm] = useState<Partial<Contact>>({});
+  const [relBusy, setRelBusy] = useState(false);
   useEffect(() => { setDrawerId(params.get("open")); }, [params]);
 
   const customers = useMemo(() => {
     const s = q.toLowerCase();
-    return d.customers.filter((c) => !s || [c.company, c.name, c.city, c.phone, c.email].some((v) => v.toLowerCase().includes(s)));
+    return d.customers.filter((c) => !s || [c.company, c.name, c.city, c.phone, c.email].some((v) => String(v || "").toLowerCase().includes(s)));
   }, [d.customers, q]);
-  const companies = useMemo(() => d.companies.filter((c) => !q || [c.name, c.city].some((v) => v.toLowerCase().includes(q.toLowerCase()))), [d.companies, q]);
-  const contacts = useMemo(() => d.contacts.filter((c) => !q || [c.name, c.email, c.phone].some((v) => v.toLowerCase().includes(q.toLowerCase()))), [d.contacts, q]);
+  const companies = useMemo(() => d.companies.filter((c) => !q || [c.name, c.city].some((v) => String(v || "").toLowerCase().includes(q.toLowerCase()))), [d.companies, q]);
+  const contacts = useMemo(() => d.contacts.filter((c) => !q || [c.name, c.email, c.phone].some((v) => String(v || "").toLowerCase().includes(q.toLowerCase()))), [d.contacts, q]);
 
-  const saveCo = () => {
+  const saveCo = async () => {
     if (!coForm.name?.trim()) { toast("Company name required", "err"); return; }
-    if (coEdit) { mutate((db) => { const c = db.companies.find((x) => x.id === coEdit.id); if (c) Object.assign(c, coForm); }); toast("Company updated"); }
-    else { mutate((db) => db.companies.unshift({ id: uid(), name: coForm.name!, industry: coForm.industry || "", website: coForm.website || "", phone: coForm.phone || "", email: coForm.email || "", city: coForm.city || "", state: coForm.state || "", address: coForm.address || "", gstin: coForm.gstin || "", notes: "", createdAt: new Date().toISOString() })); toast("Company created"); }
-    setCoModal(false); setCoEdit(null); setCoForm({});
+    setRelBusy(true);
+    try {
+      const body = {
+        name: coForm.name.trim(), industry: coForm.industry || "", website: coForm.website || "",
+        phone: coForm.phone || "", email: coForm.email || "", city: coForm.city || "", state: coForm.state || "",
+        address: coForm.address || "", gst: coForm.gstin || "", notes: coForm.notes || "",
+      };
+      const r = coEdit ? await companyApi.update(Number(coEdit.id), body) : await companyApi.create(body);
+      const row = companyFromApi(r.data);
+      mutate((db) => {
+        const index = db.companies.findIndex((x) => x.id === row.id);
+        if (index >= 0) db.companies[index] = row; else db.companies.unshift(row);
+      });
+      toast(coEdit ? "Company updated" : "Company created", "ok");
+      setCoModal(false); setCoEdit(null); setCoForm({});
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not save company", "err"); }
+    finally { setRelBusy(false); }
   };
-  const saveCt = () => {
+  const saveCt = async () => {
     if (!ctForm.name?.trim()) { toast("Contact name required", "err"); return; }
-    if (ctEdit) { mutate((db) => { const c = db.contacts.find((x) => x.id === ctEdit.id); if (c) Object.assign(c, ctForm); }); toast("Contact updated"); }
-    else { mutate((db) => db.contacts.unshift({ id: uid(), name: ctForm.name!, title: ctForm.title || "", companyId: ctForm.companyId, phone: ctForm.phone || "", email: ctForm.email || "", whatsapp: ctForm.whatsapp || "", city: ctForm.city || "", notes: "", createdAt: new Date().toISOString() })); toast("Contact created"); }
-    setCtModal(false); setCtEdit(null); setCtForm({});
+    setRelBusy(true);
+    try {
+      const names = splitName(ctForm.name);
+      const body = {
+        ...names, designation: ctForm.title || "", company_id: ctForm.companyId ? Number(ctForm.companyId) : null,
+        phone: ctForm.phone || "", email: ctForm.email || "", whatsapp: ctForm.whatsapp || "",
+        city: ctForm.city || "", notes: ctForm.notes || "",
+      };
+      const r = ctEdit ? await contactApi.update(Number(ctEdit.id), body) : await contactApi.create(body);
+      const row = contactFromApi(r.data);
+      mutate((db) => {
+        const index = db.contacts.findIndex((x) => x.id === row.id);
+        if (index >= 0) db.contacts[index] = row; else db.contacts.unshift(row);
+      });
+      toast(ctEdit ? "Contact updated" : "Contact created", "ok");
+      setCtModal(false); setCtEdit(null); setCtForm({});
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not save contact", "err"); }
+    finally { setRelBusy(false); }
   };
 
   return (
@@ -239,7 +318,7 @@ export default function Relations() {
             <Field label="Website"><Input value={coForm.website || ""} onChange={(e) => setCoForm((f) => ({ ...f, website: e.target.value }))} /></Field>
             <Field label="GSTIN"><Input value={coForm.gstin || ""} onChange={(e) => setCoForm((f) => ({ ...f, gstin: e.target.value }))} /></Field>
           </div>
-          <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setCoModal(false)}>Cancel</Btn><Btn onClick={saveCo}>Save</Btn></div>
+          <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setCoModal(false)}>Cancel</Btn><Btn loading={relBusy} onClick={() => void saveCo()}>Save</Btn></div>
         </Modal>
       )}
       {ctModal && (
@@ -252,13 +331,8 @@ export default function Relations() {
             <Field label="Phone"><Input value={ctForm.phone || ""} onChange={(e) => setCtForm((f) => ({ ...f, phone: e.target.value }))} /></Field>
             <Field label="Email"><Input value={ctForm.email || ""} onChange={(e) => setCtForm((f) => ({ ...f, email: e.target.value }))} /></Field>
           </div>
-          <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setCtModal(false)}>Cancel</Btn><Btn onClick={saveCt}>Save</Btn></div>
+          <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setCtModal(false)}>Cancel</Btn><Btn loading={relBusy} onClick={() => void saveCt()}>Save</Btn></div>
         </Modal>
-      )}
-      {user && can("customers", "delete") && tab === "customers" && drawerId === null && (
-        <div className="mt-3 flex justify-end">
-          <Btn variant="ghost" size="xs" onClick={() => { const last = customers[customers.length - 1]; if (last && window.confirm(`Delete customer ${last.company}?`)) { mutate((db) => { db.customers = db.customers.filter((c) => c.id !== last.id); }); toast("Customer deleted", "warn"); } }}><Trash2 size={12} /> Delete last customer (demo)</Btn>
-        </div>
       )}
     </div>
   );
