@@ -173,7 +173,7 @@ export default function Quotations() {
                       <MenuItem onClick={() => void setStatus(qt, "Rejected")}><X size={13} /> Mark rejected</MenuItem>
                     </>}
                     {(st === "Accepted" || st === "Sent") && can("invoices", "create") && <MenuItem onClick={() => void toInvoice(qt)}><ArrowRight size={13} /> Convert to invoice</MenuItem>}
-                    {can("quotations", "create") && <MenuItem onClick={() => void duplicate(qt)><Copy size={13} /> Duplicate</MenuItem>}
+                    {can("quotations", "create") && <MenuItem onClick={() => void duplicate(qt)}><Copy size={13} /> Duplicate</MenuItem>}
                     {can("quotations", "edit") && <MenuItem onClick={() => { setEditId(qt.id); setOpenId(null); }}><Pencil size={13} /> Edit</MenuItem>}
                     {can("quotations", "delete") && <MenuItem danger onClick={() => void removeQuotation(qt)}><X size={13} /> Delete</MenuItem>}
                   </Menu>
@@ -214,7 +214,7 @@ export default function Quotations() {
                 <Btn variant="soft" size="sm" onClick={() => void setStatus(open, "Accepted")}><Check size={13} /> Accepted</Btn>
                 <Btn variant="ghost" size="sm" onClick={() => void setStatus(open, "Rejected")}><X size={13} /> Rejected</Btn>
               </>}
-              {(effStatus(open) === "Accepted" || effStatus(open) === "Sent") && can("invoices", "create") && <Btn variant="amber" size="sm" onClick={() => void toInvoice(open)><ArrowRight size={13} /> Convert to invoice</Btn>}
+              {(effStatus(open) === "Accepted" || effStatus(open) === "Sent") && can("invoices", "create") && <Btn variant="amber" size="sm" onClick={() => void toInvoice(open)}><ArrowRight size={13} /> Convert to invoice</Btn>}
             </div>
           </div>
         </Drawer>
