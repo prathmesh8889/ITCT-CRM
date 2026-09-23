@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { Plus, Pencil, Shield, Users, Zap, Search, Trash2, Check } from "lucide-react";
 import { useStore } from "../store";
-import { mutate, useDB, uid, hashPass } from "../lib/db";
+import { mutate, useDB, uid } from "../lib/db";
 import { logAudit, fmtDT, runTriggers, todayISO } from "../lib/services";
-import { syncUserCreate, syncUserUpdate, syncRoleSave, syncRolePerms, syncTeamCreate, syncRuleSave, syncRuleToggle, syncRuleDelete } from "../lib/adminSync";
+import { syncUserCreate, syncUserUpdate, syncRoleSave, syncRolePerms, syncRoleCreate, syncTeamCreate, syncTeamUpdate, syncRuleSave, syncRuleToggle, syncRuleDelete } from "../lib/adminSync";
+import { fromApiUser } from "../lib/mappers";
 import type { User, Role, AutomationRule, TriggerKey, RuleAction, ModuleKey, Perm } from "../lib/types";
 import { Btn, Badge, Modal, Field, Input, Select, Textarea, Tabs, EmptyState, Avatar, Toggle, statusTone } from "../components/ui";
 
@@ -18,7 +19,7 @@ const TRIGGERS: { k: TriggerKey; label: string }[] = [
 function UserModal({ onDone }: { onDone: () => void }) {
   const { user, toast } = useStore();
   const d = useDB();
-  const [f, setF] = useState(() => ({ name: "", email: "", phone: "", roleId: (d.roles.find((r) => r.name === "Sales Executive") || d.roles[0])?.id || "r_sales", teamId: "", password: "Sales@123" }));
+  const [f, setF] = useState(() => ({ name: "", email: "", phone: "", roleId: (d.roles.find((r) => r.name === "Sales Executive") || d.roles[0])?.id || "", teamId: "", password: "" }));
   const [busy, setBusy] = useState(false);
   const save = async () => {
     if (!f.name.trim() || !f.email.trim()) { toast("Name and email required", "err"); return; }
@@ -27,10 +28,9 @@ function UserModal({ onDone }: { onDone: () => void }) {
     const isSales = roleName === "Sales Executive";
     setBusy(true);
     try {
-      await syncUserCreate({ ...f, isSales }); // PostgreSQL in production mode
+      const saved = await syncUserCreate({ ...f, isSales });
+      if (saved) mutate((db) => db.users.push(fromApiUser(saved)));
     } catch (e) { toast(e instanceof Error ? e.message : "Server rejected the new user", "err"); setBusy(false); return; }
-    const colors = ["#0F766E", "#B45309", "#4F46E5", "#DB2777", "#059669", "#D97706"];
-    mutate((db) => db.users.push({ id: uid(), name: f.name, email: f.email, phone: f.phone, passHash: hashPass(f.password), roleId: f.roleId, teamId: f.teamId || undefined, active: true, color: colors[db.users.length % colors.length], isSales, createdAt: new Date().toISOString() }));
     logAudit(user!.id, "User Created", `user:${f.email}`, `${f.name} (${roleName})`);
     toast("User created", "ok", f.email);
     setBusy(false);
@@ -41,7 +41,7 @@ function UserModal({ onDone }: { onDone: () => void }) {
       <Field label="Full name" req><Input value={f.name} onChange={(e) => setF((p) => ({ ...p, name: e.target.value }))} /></Field>
       <Field label="Email" req><Input value={f.email} onChange={(e) => setF((p) => ({ ...p, email: e.target.value }))} /></Field>
       <Field label="Phone"><Input value={f.phone} onChange={(e) => setF((p) => ({ ...p, phone: e.target.value }))} /></Field>
-      <Field label="Temporary password"><Input value={f.password} onChange={(e) => setF((p) => ({ ...p, password: e.target.value }))} /></Field>
+      <Field label="Temporary password" req><Input type="password" value={f.password} onChange={(e) => setF((p) => ({ ...p, password: e.target.value }))} placeholder="12+ chars, upper/lower/number/symbol" /></Field>
       <Field label="Role"><Select value={f.roleId} onChange={(e) => setF((p) => ({ ...p, roleId: e.target.value }))}>{d.roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</Select></Field>
       <Field label="Team"><Select value={f.teamId} onChange={(e) => setF((p) => ({ ...p, teamId: e.target.value }))}><option value="">—</option>{d.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select></Field>
       <div className="col-span-2 flex justify-end gap-2"><Btn variant="ghost" onClick={onDone}>Cancel</Btn><Btn onClick={() => void save()} loading={busy}>Create user</Btn></div>
@@ -67,7 +67,34 @@ export function EmployeesPage() {
     logAudit(user!.id, patch.perms ? "Permission Changed" : "Role Changed", `role:${roleId}`, patch.name || "matrix updated");
     toast("Role saved");
   };
-  const activeRole = d.roles.find((r) => r.id === roleSel) || d.roles[2];
+  const updateTeamMembers = async (teamId: string, memberIds: string[]) => {
+    try {
+      await syncTeamUpdate(teamId, memberIds);
+      mutate((db) => {
+        const team = db.teams.find((x) => x.id === teamId);
+        if (team) team.memberIds = [...memberIds];
+        for (const u of db.users) {
+          if (memberIds.includes(u.id)) u.teamId = teamId;
+          else if (u.teamId === teamId) u.teamId = undefined;
+        }
+      });
+      toast("Team membership updated", "ok");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not update team", "err"); }
+  };
+  const createRole = async () => {
+    try {
+      const saved = await syncRoleCreate();
+      if (!saved) return;
+      const row: Role = {
+        id: String(saved.id), name: saved.name, description: saved.description || "",
+        system: !!saved.system, perms: saved.perms || {},
+      };
+      mutate((db) => db.roles.push(row));
+      setRoleSel(row.id);
+      toast("Custom role created", "ok");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not create role", "err"); }
+  };
+  const activeRole = d.roles.find((r) => r.id === roleSel) || d.roles[2] || d.roles[0];
 
   return (
     <div className="mx-auto max-w-[1250px] p-4 md:p-6">
@@ -110,10 +137,10 @@ export function EmployeesPage() {
               </div>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {t.memberIds.map((id) => { const u = d.users.find((x) => x.id === id); return u ? <span key={id} className="flex items-center gap-1.5 rounded-full border border-ink-200 py-0.5 pl-0.5 pr-2 text-[11.5px] dark:border-ink-700"><Avatar name={u.name} color={u.color} size={18} />{u.name.split(" ")[0]}
-                  {can("employees", "edit") && <button className="text-ink-300 hover:text-red-500" onClick={() => { mutate((db) => { const tm = db.teams.find((x) => x.id === t.id); if (tm) tm.memberIds = tm.memberIds.filter((m) => m !== id); const usr = db.users.find((x) => x.id === id); if (usr) usr.teamId = undefined; }); }}><Trash2 size={11} /></button>}</span> : null; })}
+                  {can("employees", "edit") && <button className="text-ink-300 hover:text-red-500" onClick={() => void updateTeamMembers(t.id, t.memberIds.filter((m) => m !== id))}><Trash2 size={11} /></button>}</span> : null; })}
               </div>
               {can("employees", "edit") && (
-                <Select className="mt-3 !w-auto" defaultValue="" onChange={(e) => { if (!e.target.value) return; mutate((db) => { const tm = db.teams.find((x) => x.id === t.id); if (tm && !tm.memberIds.includes(e.target.value)) tm.memberIds.push(e.target.value); const usr = db.users.find((x) => x.id === e.target.value); if (usr) usr.teamId = t.id; }); e.target.value = ""; }}>
+                <Select className="mt-3 !w-auto" defaultValue="" onChange={(e) => { const id = e.target.value; if (!id) return; void updateTeamMembers(t.id, [...t.memberIds, id]); e.target.value = ""; }}>
                   <option value="" disabled>+ Add member…</option>
                   {d.users.filter((u) => u.isSales && !t.memberIds.includes(u.id)).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                 </Select>
@@ -133,7 +160,7 @@ export function EmployeesPage() {
               </button>
             ))}
             {can("employees", "create") && (
-              <Btn variant="outline" size="sm" className="mt-2 w-full" onClick={() => { const id = uid(); mutate((db) => db.roles.push({ id, name: "Custom Role", description: "Custom role", system: false, perms: { dashboard: ["view"], leads: ["view"] } })); setRoleSel(id); toast("Custom role created"); }}><Plus size={13} /> New role</Btn>
+              <Btn variant="outline" size="sm" className="mt-2 w-full" onClick={() => void createRole()}><Plus size={13} /> New role</Btn>
             )}
           </div>
           <div className="card overflow-hidden">
@@ -191,7 +218,7 @@ export function EmployeesPage() {
             </div>
           </div>
           <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setTeamModal(false)}>Cancel</Btn>
-            <Btn onClick={() => { if (!teamF.name.trim()) return; void syncTeamCreate(teamF).then(() => { mutate((db) => db.teams.push({ id: uid(), ...teamF })); toast("Team created"); setTeamModal(false); }).catch((err) => toast(err instanceof Error ? err.message : "Server rejected the team", "err")); }}>Create team</Btn></div>
+            <Btn onClick={() => { if (!teamF.name.trim()) return; void syncTeamCreate(teamF).then((saved) => { if (saved) mutate((db) => db.teams.push({ id: String(saved.id), ...teamF })); toast("Team created", "ok"); setTeamModal(false); }).catch((err) => toast(err instanceof Error ? err.message : "Server rejected the team", "err")); }}>Create team</Btn></div>
         </Modal>
       )}
       {can("employees", "view") && <span className="hidden"><Users size={1} /></span>}
@@ -214,11 +241,22 @@ export function AutomationPage() {
 
   const save = async () => {
     if (!f.name?.trim()) { toast("Rule name required", "err"); return; }
-    try { await syncRuleSave({ ...f, id: editId || undefined }, !!editId); }
-    catch (e) { toast(e instanceof Error ? e.message : "Server rejected the rule", "err"); return; }
-    if (editId) { mutate((db) => { const r = db.rules.find((x) => x.id === editId); if (r) Object.assign(r, f); }); logAudit(user!.id, "Automation Modified", editId, f.name!); toast("Rule updated"); }
-    else { mutate((db) => db.rules.push({ id: uid(), name: f.name!, trigger: f.trigger as TriggerKey, condField: f.condField || "", condOp: f.condOp || "eq", condValue: f.condValue || "", actions: f.actions || [], enabled: f.enabled ?? true })); toast("Rule created"); }
-    setModal(false); setEditId(null);
+    try {
+      const saved = await syncRuleSave({ ...f, id: editId || undefined }, !!editId);
+      if (editId) {
+        mutate((db) => { const r = db.rules.find((x) => x.id === editId); if (r) Object.assign(r, f); });
+        logAudit(user!.id, "Automation Modified", editId, f.name!);
+        toast("Rule updated", "ok");
+      } else {
+        mutate((db) => db.rules.push({
+          id: String(saved?.id), name: f.name!, trigger: f.trigger as TriggerKey,
+          condField: f.condField || "", condOp: f.condOp || "eq", condValue: f.condValue || "",
+          actions: f.actions || [], enabled: f.enabled ?? true,
+        }));
+        toast("Rule created", "ok");
+      }
+      setModal(false); setEditId(null);
+    } catch (e) { toast(e instanceof Error ? e.message : "Server rejected the rule", "err"); }
   };
   const describeAction = (a: RuleAction) => {
     const t = ACTION_TYPES.find((x) => x.k === a.type)?.label || a.type;

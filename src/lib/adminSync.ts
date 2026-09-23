@@ -16,9 +16,9 @@ const ruleBody = (r: Partial<AutomationRule>) => ({
   cond_value: r.condValue || "", actions: r.actions || [], enabled: r.enabled ?? true,
 });
 
-export async function syncUserCreate(u: { name: string; email: string; phone: string; password: string; roleId: string; teamId?: string; isSales: boolean }): Promise<void> {
-  if (DEMO_MODE) return;
-  await userApi.create({
+export async function syncUserCreate(u: { name: string; email: string; phone: string; password: string; roleId: string; teamId?: string; isSales: boolean }): Promise<any> {
+  if (DEMO_MODE) return null;
+  const r = await userApi.create({
     name: u.name.trim(),
     email: u.email.trim().toLowerCase(),
     phone: (u.phone || "").trim(),
@@ -30,6 +30,7 @@ export async function syncUserCreate(u: { name: string; email: string; phone: st
     is_sales: u.isSales,
     active: true,
   });
+  return r.data;
 }
 
 export async function syncUserUpdate(id: string, patch: Partial<User>): Promise<void> {
@@ -57,15 +58,36 @@ export async function syncRolePerms(roleId: string, perms: Record<string, string
   await roleApi.setPermissions(nid(roleId), { perms } as unknown as Record<string, string[]>);
 }
 
-export async function syncTeamCreate(t: { name: string; focus: string; memberIds: string[] }): Promise<void> {
-  if (DEMO_MODE) return;
-  await teamApi.create({ name: t.name, focus: t.focus || "", member_ids: t.memberIds.map(nid) });
+export async function syncTeamCreate(t: { name: string; focus: string; memberIds: string[] }): Promise<any> {
+  if (DEMO_MODE) return null;
+  const r = await teamApi.create({ name: t.name, focus: t.focus || "", member_ids: t.memberIds.map(nid) });
+  return r.data;
 }
 
-export async function syncRuleSave(rule: Partial<AutomationRule>, editing: boolean): Promise<void> {
-  if (DEMO_MODE) return;
-  if (editing && rule.id) await automationApi.updateRule(nid(rule.id), ruleBody(rule));
-  else await automationApi.createRule(ruleBody(rule));
+export async function syncTeamUpdate(teamId: string, memberIds: string[]): Promise<any> {
+  if (DEMO_MODE) return null;
+  const r = await teamApi.update(nid(teamId), { member_ids: memberIds.map(nid) });
+  return r.data;
+}
+
+export async function syncRoleCreate(): Promise<any> {
+  if (DEMO_MODE) return null;
+  const r = await roleApi.create({
+    name: `Custom Role ${Date.now().toString().slice(-6)}`,
+    description: "Custom role",
+    perms: { dashboard: ["view"], leads: ["view"] },
+  });
+  return r.data;
+}
+
+export async function syncRuleSave(rule: Partial<AutomationRule>, editing: boolean): Promise<any> {
+  if (DEMO_MODE) return null;
+  if (editing && rule.id) {
+    const r = await automationApi.updateRule(nid(rule.id), ruleBody(rule));
+    return r.data;
+  }
+  const r = await automationApi.createRule(ruleBody(rule));
+  return r.data;
 }
 
 export async function syncRuleToggle(ruleId: string, enabled: boolean): Promise<void> {

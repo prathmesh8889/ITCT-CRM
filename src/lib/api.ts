@@ -51,8 +51,17 @@ async function doRefresh(): Promise<string> {
   return r.data.access_token;
 }
 
+export const CRM_DATA_CHANGED_EVENT = "itct:crm-data-changed";
+
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    const method = String(res.config.method || "get").toLowerCase();
+    const url = String(res.config.url || "");
+    if (["post", "put", "patch", "delete"].includes(method) && !url.includes("/auth/")) {
+      try { window.dispatchEvent(new CustomEvent(CRM_DATA_CHANGED_EVENT)); } catch { /* non-browser test runtime */ }
+    }
+    return res;
+  },
   async (err: AxiosError<{ detail?: string }>) => {
     const status = err.response?.status;
     const msg = err.response?.data?.detail || err.message;
@@ -133,6 +142,15 @@ export const leadApi = {
   exportCSV: () => api.get("/leads/export", { responseType: "blob" }),
 };
 
+export const discoveryApi = {
+  list: () => api.get("/discovery/jobs"),
+  get: (id: number) => api.get(`/discovery/jobs/${id}`),
+  create: (b: unknown) => api.post("/discovery/jobs", b),
+  pause: (id: number) => api.post(`/discovery/jobs/${id}/pause`),
+  resume: (id: number) => api.post(`/discovery/jobs/${id}/resume`),
+  cancel: (id: number) => api.post(`/discovery/jobs/${id}/cancel`),
+};
+
 // ---------- customers / companies / contacts ----------
 export const customerApi = {
   list: (q?: Query) => api.get<Paged<unknown>>("/customers", { params: q }),
@@ -140,6 +158,8 @@ export const customerApi = {
   create: (b: unknown) => api.post("/customers", b),
   update: (id: number, b: unknown) => api.patch(`/customers/${id}`, b),
   remove: (id: number) => api.delete(`/customers/${id}`),
+  notes: () => api.get("/customer-notes"),
+  addNote: (id: number, body: string) => api.post(`/customers/${id}/notes`, { body }),
 };
 export const companyApi = {
   list: (q?: Query) => api.get<Paged<unknown>>("/companies", { params: q }),
@@ -160,6 +180,16 @@ export const dealApi = {
   moveStage: (id: number, stage_id: string) => api.patch(`/deals/${id}/stage`, { stage_id }),
   remove: (id: number) => api.delete(`/deals/${id}`),
   stages: () => api.get("/deals/stages"),
+  createStage: (name: string) => api.post("/deals/stages", { name }),
+  removeStage: (id: number) => api.delete(`/deals/stages/${id}`),
+};
+export const crmCatalogApi = {
+  statuses: () => api.get("/lead-statuses-config"),
+  createStatus: (name: string) => api.post("/lead-statuses-config", { name }),
+  removeStatus: (id: number) => api.delete(`/lead-statuses-config/${id}`),
+  sources: () => api.get("/lead-sources-config"),
+  createSource: (name: string) => api.post("/lead-sources-config", { name }),
+  removeSource: (id: number) => api.delete(`/lead-sources-config/${id}`),
 };
 
 // ---------- workflow ----------
@@ -172,10 +202,13 @@ export const taskApi = {
   list: (q?: Query) => api.get<Paged<unknown>>("/tasks", { params: q }),
   create: (b: unknown) => api.post("/tasks", b),
   update: (id: number, b: unknown) => api.patch(`/tasks/${id}`, b),
+  remove: (id: number) => api.delete(`/tasks/${id}`),
 };
 export const meetingApi = {
   list: (q?: Query) => api.get<Paged<unknown>>("/meetings", { params: q }),
   create: (b: unknown) => api.post("/meetings", b),
+  update: (id: number, b: unknown) => api.patch(`/meetings/${id}`, b),
+  remove: (id: number) => api.delete(`/meetings/${id}`),
 };
 export const callApi = { create: (b: unknown) => api.post("/calls", b) };
 
@@ -184,12 +217,14 @@ export const productApi = {
   list: () => api.get("/products"),
   create: (b: unknown) => api.post("/products", b),
   update: (id: number, b: unknown) => api.patch(`/products/${id}`, b),
+  remove: (id: number) => api.delete(`/products/${id}`),
 };
 export const quotationApi = {
   list: (q?: Query) => api.get<Paged<unknown>>("/quotations", { params: q }),
   get: (id: number) => api.get(`/quotations/${id}`),
   create: (b: unknown) => api.post("/quotations", b),
   update: (id: number, b: unknown) => api.patch(`/quotations/${id}`, b),
+  remove: (id: number) => api.delete(`/quotations/${id}`),
   convertToInvoice: (id: number) => api.post(`/quotations/${id}/convert-to-invoice`),
 };
 export const invoiceApi = {
@@ -204,6 +239,7 @@ export const paymentApi = { list: (q?: Query) => api.get<Paged<unknown>>("/payme
 export const expenseApi = {
   list: (q?: Query) => api.get<Paged<unknown>>("/expenses", { params: q }),
   create: (b: unknown) => api.post("/expenses", b),
+  remove: (id: number) => api.delete(`/expenses/${id}`),
 };
 
 // ---------- admin ----------

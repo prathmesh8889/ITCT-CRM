@@ -2,33 +2,48 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Pencil, Copy, Printer, FileText, Send, Check, X, MessageCircle, ArrowRight } from "lucide-react";
 import { useStore } from "../store";
-import { mutate, useDB, uid } from "../lib/db";
-import { docTotals, nextDocNumber, runTriggers, logAct, waLink, renderTemplate, fmtD, todayISO, addDaysISO, inr } from "../lib/services";
+import { mutate, useDB } from "../lib/db";
+import { docTotals, logAct, waLink, renderTemplate, fmtD, todayISO, addDaysISO, inr } from "../lib/services";
+import { quotationApi } from "../lib/api";
+import { fromApiQuotation, fromApiInvoice, toApiItems } from "../lib/mappers";
 import type { Quotation, QuoteStatus, DocItem } from "../lib/types";
 import { Btn, Badge, Modal, Drawer, Field, Input, Select, Textarea, EmptyState, Money, statusTone, Menu, MenuItem } from "../components/ui";
 import { DocEditor, DocPrint } from "../components/docui";
 import { usePrint } from "../components/ui";
 
 function QuoteModal({ initial, onDone, editing }: { initial: Partial<Quotation>; onDone: () => void; editing: boolean }) {
-  const { user, toast } = useStore();
+  const { toast } = useStore();
   const d = useDB();
   const [f, setF] = useState<Partial<Quotation>>(initial);
   const [items, setItems] = useState<DocItem[]>(initial.items || []);
   const [disc, setDisc] = useState(initial.discountPct || 0);
-  const save = (status?: QuoteStatus) => {
+  const [busy, setBusy] = useState(false);
+  const save = async (status?: QuoteStatus) => {
     if (!f.customerId) { toast("Select a customer", "err"); return; }
     if (items.length === 0) { toast("Add at least one line item", "err"); return; }
-    const number = f.number || nextDocNumber(d, "QT");
-    if (editing && f.id) {
-      mutate((db) => { const q = db.quotations.find((x) => x.id === f.id); if (q) Object.assign(q, { ...f, items, discountPct: disc, status: status || q.status }); });
-      logAct("quote", f.id, user!.id, "Quotation modified", number);
-      toast("Quotation updated");
-    } else {
-      mutate((db) => { db.quotations.unshift({ id: uid(), number, customerId: f.customerId!, date: f.date || todayISO(), validUntil: f.validUntil || addDaysISO(15), items, discountPct: disc, status: status || "Draft", terms: f.terms || "50% advance, balance on delivery.", notes: f.notes || "", createdBy: user!.id, createdAt: new Date().toISOString() }); });
-      logAct("quote", number, user!.id, "Quotation created", `${number} · ${inr(docTotals(items, disc).total)}`);
-      toast("Quotation created", "ok", number);
-    }
-    onDone();
+    setBusy(true);
+    try {
+      const body = {
+        customer_id: Number(f.customerId),
+        date: f.date || todayISO(),
+        valid_until: f.validUntil || addDaysISO(15),
+        items: toApiItems(items),
+        terms: f.terms || "50% advance, balance on delivery.",
+        notes: f.notes || "",
+        status: status || (editing ? f.status : "Draft") || "Draft",
+      };
+      const r = editing && f.id
+        ? await quotationApi.update(Number(f.id), body)
+        : await quotationApi.create(body);
+      const row = { ...fromApiQuotation(r.data as any), discountPct: disc };
+      mutate((db) => {
+        const index = db.quotations.findIndex((x) => x.id === row.id);
+        if (index >= 0) db.quotations[index] = row; else db.quotations.unshift(row);
+      });
+      toast(editing ? "Quotation updated" : "Quotation created", "ok", row.number);
+      onDone();
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not save quotation", "err"); }
+    finally { setBusy(false); }
   };
   return (
     <div>
@@ -44,8 +59,8 @@ function QuoteModal({ initial, onDone, editing }: { initial: Partial<Quotation>;
       </div>
       <div className="mt-4 flex justify-end gap-2">
         <Btn variant="ghost" onClick={onDone}>Cancel</Btn>
-        <Btn variant="outline" onClick={() => save("Draft")}>Save draft</Btn>
-        <Btn onClick={() => save(editing ? f.status : "Draft")}>{editing ? "Save changes" : "Create quotation"}</Btn>
+        <Btn variant="outline" loading={busy} onClick={() => void save("Draft")}>Save draft</Btn>
+        <Btn loading={busy} onClick={() => void save(editing ? f.status : "Draft")}>{editing ? "Save changes" : "Create quotation"}</Btn>
       </div>
     </div>
   );
@@ -70,28 +85,49 @@ export default function Quotations() {
   const list = useMemo(() => d.quotations.filter((x) => !q || x.number.toLowerCase().includes(q.toLowerCase()) || d.customers.find((c) => c.id === x.customerId)?.company.toLowerCase().includes(q.toLowerCase())), [d.quotations, d.customers, q]);
   const open = openId ? d.quotations.find((x) => x.id === openId) : null;
 
-  const setStatus = (qt: Quotation, status: QuoteStatus) => {
-    mutate((db) => { const x = db.quotations.find((y) => y.id === qt.id); if (x) x.status = status; });
-    logAct("quote", qt.id, user!.id, "Quotation status", `${qt.number} → ${status}`);
-    if (status === "Sent") {
-      runTriggers("quote.sent", { number: qt.number }, undefined);
-      mutate((db) => { db.notices.unshift({ id: uid(), userId: "managers", title: `Quotation ${qt.number} sent`, body: `${d.customers.find((c) => c.id === qt.customerId)?.company || ""} · ${inr(docTotals(qt.items, qt.discountPct).total)}`, read: false, at: new Date().toISOString(), link: "/quotations", kind: "quote" }); });
-    }
-    toast(`Marked ${status.toLowerCase()}`, status === "Rejected" ? "warn" : "ok");
+  const setStatus = async (qt: Quotation, status: QuoteStatus) => {
+    try {
+      const r = await quotationApi.update(Number(qt.id), { status });
+      const row = { ...fromApiQuotation(r.data as any), discountPct: qt.discountPct };
+      mutate((db) => {
+        const index = db.quotations.findIndex((x) => x.id === qt.id);
+        if (index >= 0) db.quotations[index] = row;
+      });
+      toast(`Marked ${status.toLowerCase()}`, status === "Rejected" ? "warn" : "ok");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not update quotation", "err"); }
   };
-  const duplicate = (qt: Quotation) => {
-    mutate((db) => { db.quotations.unshift({ ...qt, id: uid(), number: nextDocNumber(db, "QT"), status: "Draft", date: todayISO(), validUntil: addDaysISO(15), createdAt: new Date().toISOString(), items: qt.items.map((i) => ({ ...i, id: uid() })) }); });
-    toast("Quotation duplicated", "ok", "New draft created.");
+  const duplicate = async (qt: Quotation) => {
+    try {
+      const r = await quotationApi.create({
+        customer_id: Number(qt.customerId), date: todayISO(), valid_until: addDaysISO(15),
+        items: toApiItems(qt.items), terms: qt.terms || "", notes: qt.notes || "", status: "Draft",
+      });
+      const row = { ...fromApiQuotation(r.data as any), discountPct: qt.discountPct };
+      mutate((db) => db.quotations.unshift(row));
+      toast("Quotation duplicated", "ok", row.number);
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not duplicate quotation", "err"); }
   };
-  const toInvoice = (qt: Quotation) => {
-    mutate((db) => {
-      const num = nextDocNumber(db, "INV");
-      db.invoices.unshift({ id: uid(), number: num, customerId: qt.customerId, date: todayISO(), dueDate: addDaysISO(15), items: qt.items.map((i) => ({ ...i, id: uid() })), discountPct: qt.discountPct, status: "Draft", notes: `From quotation ${qt.number}`, quotationId: qt.id, createdBy: user!.id, createdAt: new Date().toISOString() });
-      if (qt.status !== "Accepted") qt.status = "Accepted";
-      logAct("invoice", num, user!.id, "Invoice generated", `From ${qt.number}`);
-      toast("Invoice created", "ok", `${num} is ready in Invoices (draft).`);
-    });
-    nav("/invoices");
+  const toInvoice = async (qt: Quotation) => {
+    try {
+      const r = await quotationApi.convertToInvoice(Number(qt.id));
+      const inv = { ...fromApiInvoice(r.data as any), discountPct: qt.discountPct };
+      mutate((db) => {
+        db.invoices.unshift(inv);
+        const row = db.quotations.find((x) => x.id === qt.id);
+        if (row) row.status = "Accepted";
+      });
+      toast("Invoice created", "ok", `${inv.number} is ready in Invoices (draft).`);
+      nav("/invoices");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not convert quotation", "err"); }
+  };
+  const removeQuotation = async (qt: Quotation) => {
+    if (!window.confirm(`Delete ${qt.number}?`)) return;
+    try {
+      await quotationApi.remove(Number(qt.id));
+      mutate((db) => { db.quotations = db.quotations.filter((x) => x.id !== qt.id); });
+      if (openId === qt.id) setOpenId(null);
+      toast("Quotation deleted", "warn");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not delete quotation", "err"); }
   };
   const sendWhatsApp = (qt: Quotation) => {
     const c = d.customers.find((x) => x.id === qt.customerId);
@@ -131,15 +167,15 @@ export default function Quotations() {
                   <Menu align="right" trigger={<Btn variant="ghost" size="xs">⋯</Btn>}>
                     <MenuItem onClick={() => doPrint(qt)}><Printer size={13} /> PDF / Print</MenuItem>
                     <MenuItem onClick={() => sendWhatsApp(qt)}><MessageCircle size={13} /> Send on WhatsApp</MenuItem>
-                    {qt.status === "Draft" && can("quotations", "edit") && <MenuItem onClick={() => setStatus(qt, "Sent")}><Send size={13} /> Mark sent</MenuItem>}
+                    {qt.status === "Draft" && can("quotations", "edit") && <MenuItem onClick={() => void setStatus(qt, "Sent")}><Send size={13} /> Mark sent</MenuItem>}
                     {qt.status === "Sent" && can("quotations", "approve") && <>
-                      <MenuItem onClick={() => setStatus(qt, "Accepted")}><Check size={13} /> Mark accepted</MenuItem>
-                      <MenuItem onClick={() => setStatus(qt, "Rejected")}><X size={13} /> Mark rejected</MenuItem>
+                      <MenuItem onClick={() => void setStatus(qt, "Accepted")}><Check size={13} /> Mark accepted</MenuItem>
+                      <MenuItem onClick={() => void setStatus(qt, "Rejected")}><X size={13} /> Mark rejected</MenuItem>
                     </>}
-                    {(st === "Accepted" || st === "Sent") && can("invoices", "create") && <MenuItem onClick={() => toInvoice(qt)}><ArrowRight size={13} /> Convert to invoice</MenuItem>}
-                    {can("quotations", "create") && <MenuItem onClick={() => duplicate(qt)}><Copy size={13} /> Duplicate</MenuItem>}
+                    {(st === "Accepted" || st === "Sent") && can("invoices", "create") && <MenuItem onClick={() => void toInvoice(qt)}><ArrowRight size={13} /> Convert to invoice</MenuItem>}
+                    {can("quotations", "create") && <MenuItem onClick={() => void duplicate(qt)}><Copy size={13} /> Duplicate</MenuItem>}
                     {can("quotations", "edit") && <MenuItem onClick={() => { setEditId(qt.id); setOpenId(null); }}><Pencil size={13} /> Edit</MenuItem>}
-                    {can("quotations", "delete") && <MenuItem danger onClick={() => { if (window.confirm(`Delete ${qt.number}?`)) { mutate((db) => { db.quotations = db.quotations.filter((x) => x.id !== qt.id); }); toast("Quotation deleted", "warn"); } }}><X size={13} /> Delete</MenuItem>}
+                    {can("quotations", "delete") && <MenuItem danger onClick={() => void removeQuotation(qt)}><X size={13} /> Delete</MenuItem>}
                   </Menu>
                 </td>
               </tr>
@@ -173,12 +209,12 @@ export default function Quotations() {
             {open.terms && <p className="mt-3 rounded-md bg-ink-50 p-3 text-[12px] text-ink-500 dark:bg-ink-800/60"><b>Terms:</b> {open.terms}</p>}
             <div className="mt-4 flex flex-wrap gap-2">
               <Btn variant="outline" size="sm" onClick={() => sendWhatsApp(open)}><MessageCircle size={13} /> WhatsApp</Btn>
-              {open.status === "Draft" && can("quotations", "edit") && <Btn size="sm" onClick={() => setStatus(open, "Sent")}><Send size={13} /> Mark sent</Btn>}
+              {open.status === "Draft" && can("quotations", "edit") && <Btn size="sm" onClick={() => void setStatus(open, "Sent")}><Send size={13} /> Mark sent</Btn>}
               {open.status === "Sent" && can("quotations", "approve") && <>
-                <Btn variant="soft" size="sm" onClick={() => setStatus(open, "Accepted")}><Check size={13} /> Accepted</Btn>
-                <Btn variant="ghost" size="sm" onClick={() => setStatus(open, "Rejected")}><X size={13} /> Rejected</Btn>
+                <Btn variant="soft" size="sm" onClick={() => void setStatus(open, "Accepted")}><Check size={13} /> Accepted</Btn>
+                <Btn variant="ghost" size="sm" onClick={() => void setStatus(open, "Rejected")}><X size={13} /> Rejected</Btn>
               </>}
-              {(effStatus(open) === "Accepted" || effStatus(open) === "Sent") && can("invoices", "create") && <Btn variant="amber" size="sm" onClick={() => toInvoice(open)}><ArrowRight size={13} /> Convert to invoice</Btn>}
+              {(effStatus(open) === "Accepted" || effStatus(open) === "Sent") && can("invoices", "create") && <Btn variant="amber" size="sm" onClick={() => void toInvoice(open)}><ArrowRight size={13} /> Convert to invoice</Btn>}
             </div>
           </div>
         </Drawer>

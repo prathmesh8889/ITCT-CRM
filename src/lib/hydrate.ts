@@ -10,7 +10,7 @@ import { mutate } from "./db";
 import {
   customerApi, companyApi, contactApi, dealApi, followUpApi, taskApi, meetingApi,
   productApi, quotationApi, invoiceApi, paymentApi, expenseApi, userApi, roleApi, teamApi,
-  automationApi, auditApi, settingsApi, leadApi,
+  automationApi, auditApi, settingsApi, leadApi, discoveryApi, crmCatalogApi,
 } from "./api";
 import { fromApiUser, fromApiLead, fromApiCustomer, fromApiDeal, fromApiStage,
          fromApiQuotation, fromApiInvoice, fromApiPayment } from "./mappers";
@@ -28,10 +28,11 @@ export async function hydrateFromBackend(
   const empty = () => Promise.resolve({ data: [] } as any);
   const emptySettings = () => Promise.resolve({ data: {} } as any);
 
-  const [leads, customers, companies, contacts, deals, stages, followups, tasks, meetings,
+  const [leads, discoveryJobs, customers, companies, contacts, deals, stages, followups, tasks, meetings,
          products, quotations, invoices, payments, expenses, users, roles, teams,
-         rules, executions, audit, settings] = await Promise.all([
+         rules, executions, audit, settings, customerNotes, leadStatuses, leadSources] = await Promise.all([
     canView("leads") ? leadApi.list({ page: 1, page_size: 200 }) : empty(),
+    canView("discovery") ? discoveryApi.list() : empty(),
     canView("customers") ? customerApi.list({ page: 1, page_size: 200 }) : empty(),
     canView("companies") ? companyApi.list({ page: 1, page_size: 200 }) : empty(),
     canView("contacts") ? contactApi.list({ page: 1, page_size: 200 }) : empty(),
@@ -52,6 +53,9 @@ export async function hydrateFromBackend(
     canView("automation") ? automationApi.executions() : empty(),
     canView("audit") ? auditApi.list({ page: 1, page_size: 100 }) : empty(),
     canView("settings") ? settingsApi.get() : emptySettings(),
+    canView("customers") ? customerApi.notes() : empty(),
+    crmCatalogApi.statuses(),
+    crmCatalogApi.sources(),
   ]);
 
   const paged = (r: any) => (Array.isArray(r?.data) ? r.data : r?.data?.items || []);
@@ -67,6 +71,15 @@ export async function hydrateFromBackend(
     db.teams = paged(teams).map((t: any) => ({ id: S(t.id)!, name: t.name, focus: t.focus || "",
       memberIds: (t.member_ids || []).map(String) }));
     db.leads = paged(leads).map((l: any) => fromApiLead(l));
+    db.discoveryJobs = paged(discoveryJobs).map((j: any) => ({
+      id: S(j.id)!, createdBy: S(j.created_by)!, category: j.category || "", location: j.location || "",
+      target: Number(j.target) || 0, source: j.source || "maps", keywords: j.keywords || "",
+      status: j.status || "Queued", discovered: Number(j.discovered) || 0, valid: Number(j.valid) || 0,
+      duplicates: Number(j.duplicates) || 0, invalid: Number(j.invalid) || 0,
+      failedRecords: Number(j.failed_records) || 0, startedAt: j.started_at || null,
+      completedAt: j.completed_at || null, error: j.error || "", attempts: 0,
+      retryLog: Array.isArray(j.retry_log) ? j.retry_log : [],
+    }));
     db.customers = paged(customers).map((c: any) => fromApiCustomer(c));
     db.companies = paged(companies).map((c: any) => ({ id: S(c.id)!, name: c.name, industry: c.industry || "",
       website: c.website || "", phone: c.phone || "", email: c.email || "", city: c.city || "", state: c.state || "",
@@ -74,6 +87,8 @@ export async function hydrateFromBackend(
     db.contacts = paged(contacts).map((c: any) => ({ id: S(c.id)!, name: `${c.first_name} ${c.last_name || ""}`.trim(),
       title: c.designation || "", companyId: S(c.company_id) || undefined, phone: c.phone || "", email: c.email || "",
       whatsapp: c.whatsapp || "", city: c.city || "", notes: c.notes || "", createdAt: c.created_at }));
+    db.notes = paged(customerNotes).map((n: any) => ({ id: S(n.id)!, entityType: "customer" as const,
+      entityId: S(n.entity_id)!, body: n.body || "", authorId: S(n.author_id) || "", createdAt: n.created_at }));
     db.dealStages = paged(stages).map((s: any) => fromApiStage(s));
     db.deals = paged(deals).map((d: any) => fromApiDeal(d));
     db.followups = paged(followups).map((f: any) => ({ id: S(f.id)!, entityType: f.entity_type || "lead",
@@ -109,9 +124,8 @@ export async function hydrateFromBackend(
       at: a.created_at }));
     db.templates = (settings.data?.templates || []).map((t: any) => ({ id: S(t.id)!, channel: t.channel,
       name: t.name, subject: t.subject || "", body: t.body || "" }));
-    db.leadStatuses = ["New", "Contacted", "Interested", "Follow-up", "Qualified", "Proposal", "Negotiation", "Won", "Lost"];
-    db.leadSources = ["Google Maps", "Website Form", "Referral", "Justdial", "LinkedIn", "Cold Outreach",
-      "CSV Import", "Discovery", "IndiaMART", "Walk-in"];
+    db.leadStatuses = paged(leadStatuses).map((x: any) => String(x.name));
+    db.leadSources = paged(leadSources).map((x: any) => String(x.name));
     db.settings = {
       company: { name: co.name || "IT CYBER TECHNOLOGIES PVT LTD", tagline: co.tagline || "",
         email: co.email || "", phone: co.phone || "", website: co.website || "", address: co.address || "",

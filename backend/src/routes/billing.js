@@ -93,10 +93,20 @@ router.patch("/products/:id", requirePerm("products", "edit"), async (req, res, 
     const allowed = ["name", "sku", "category", "description", "unit", "unit_price", "gst_percent", "active"];
     const patch = Object.entries(req.body || {}).filter(([k, v]) => allowed.includes(k) && v !== undefined);
     if (patch.length) {
-      const sets = patch.map(([k], i) => `${k} = $${i + 1}`).join(", ");
-      await db.query(`UPDATE products SET ${sets} WHERE id = $${patch.length + 1}`, [...patch.map(([, v]) => v), p.id]);
+      const sets = patch.map(([k], i) => `${k} = ${i + 1}`).join(", ");
+      await db.query(`UPDATE products SET ${sets} WHERE id = ${patch.length + 1}`, [...patch.map(([, v]) => v), p.id]);
     }
     res.json(await db.one("SELECT * FROM products WHERE id = $1", [p.id]));
+  } catch (e) { next(e); }
+});
+
+router.delete("/products/:id", requirePerm("products", "delete"), async (req, res, next) => {
+  try {
+    const p = await db.one("SELECT * FROM products WHERE id = $1", [Number(req.params.id)]);
+    if (!p) throw new HttpError(404, "Product not found");
+    await db.query("DELETE FROM products WHERE id = $1", [p.id]);
+    await audit(req.user, "Product Deleted", p.sku, p.name);
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
@@ -158,6 +168,17 @@ router.patch("/quotations/:id", requirePerm("quotations", "edit"), async (req, r
     if (b.status === "Sent")
       await runTriggers("quote.sent", { extra: { title: `Quotation ${q.quotation_number} sent`, link: "/quotations", kind: "quote" } });
     res.json(quoteOut(await db.one("SELECT * FROM quotations WHERE id = $1", [q.id])));
+  } catch (e) { next(e); }
+});
+
+router.delete("/quotations/:id", requirePerm("quotations", "delete"), async (req, res, next) => {
+  try {
+    const q = await ensureQuotation(req, Number(req.params.id));
+    const linked = await db.one("SELECT COUNT(*)::int AS n FROM invoices WHERE quotation_id = $1", [q.id]);
+    if (Number(linked?.n || 0) > 0) throw new HttpError(409, "Quotation is linked to an invoice and cannot be deleted");
+    await db.query("DELETE FROM quotations WHERE id = $1", [q.id]);
+    await audit(req.user, "Quotation Deleted", q.quotation_number);
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
@@ -293,6 +314,17 @@ router.post("/expenses", requirePerm("expenses", "create"), async (req, res, nex
       [b.category || "General", b.description || "", money(amount), b.date || new Date().toISOString().slice(0, 10),
        req.user.id, b.payment_method || "UPI", b.notes || ""]);
     res.status(201).json({ id: r.rows[0].id });
+  } catch (e) { next(e); }
+});
+
+router.delete("/expenses/:id", requirePerm("expenses", "delete"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const row = await db.one("SELECT * FROM expenses WHERE id = $1", [id]);
+    if (!row) throw new HttpError(404, "Expense not found");
+    await db.query("DELETE FROM expenses WHERE id = $1", [id]);
+    await audit(req.user, "Expense Deleted", `expense:${id}`, row.description || "");
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 

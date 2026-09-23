@@ -36,8 +36,8 @@ export interface ApiLead {
 export interface ApiCustomer {
   id: number; customer_code: string; name: string; company: string;
   email: string; phone: string; whatsapp: string;
-  gst_number: string; pan_number: string; city: string; state: string;
-  account_manager_id: number | null; status: string; notes: string;
+  gst_number: string; pan_number: string; billing_address?: string; shipping_address?: string;
+  city: string; state: string; country?: string; account_manager_id: number | null; status: string; notes: string;
   lead_id: number | null; created_at: string;
 }
 

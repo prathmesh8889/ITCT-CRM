@@ -398,6 +398,7 @@ router.get("/customers", requirePerm("customers", "view"), async (req, res, next
       [...params, pageSize, (page - 1) * pageSize]);
     res.json({ items: items.map((c) => ({ id: c.id, customer_code: c.customer_code, name: c.name, company: c.company,
       email: c.email, phone: c.phone, whatsapp: c.whatsapp, gst_number: c.gst_number, pan_number: c.pan_number,
+      billing_address: c.billing_address, shipping_address: c.shipping_address, country: c.country,
       city: c.city, state: c.state, account_manager_id: c.account_manager_id, status: c.status, notes: c.notes,
       lead_id: c.lead_id, created_at: c.created_at })), total, page, page_size: pageSize });
   } catch (e) { next(e); }
@@ -450,6 +451,33 @@ router.delete("/customers/:id", requirePerm("customers", "delete"), async (req, 
     await db.query("UPDATE customers SET deleted_at = now() WHERE id = $1", [c.id]);
     await activity(req.user.id, "Customer Deleted", "customers", c.id, { name: c.name });
     res.json({ ok: true, soft_deleted: true });
+  } catch (e) { next(e); }
+});
+
+// Customer notes are persisted in PostgreSQL and hydrated with the relationship panel.
+router.get("/customer-notes", requirePerm("customers", "view"), async (req, res, next) => {
+  try {
+    const own = applyOwnership(req, "account_manager_id");
+    const rows = own.sql
+      ? await db.all(`SELECT n.* FROM notes n JOIN customers c ON c.id=n.entity_id
+                       WHERE n.entity_type='customer' AND c.deleted_at IS NULL AND c.account_manager_id=$1
+                       ORDER BY n.created_at DESC`, [req.user.id])
+      : await db.all("SELECT * FROM notes WHERE entity_type='customer' ORDER BY created_at DESC");
+    res.json(rows);
+  } catch (e) { next(e); }
+});
+
+router.post("/customers/:id/notes", requirePerm("customers", "edit"), async (req, res, next) => {
+  try {
+    const customer = await ensureCustomer(req, Number(req.params.id));
+    const body = String(req.body?.body || "").trim();
+    if (!body) throw new HttpError(422, "note body is required");
+    const r = await db.query(
+      "INSERT INTO notes (entity_type, entity_id, body, author_id) VALUES ('customer',$1,$2,$3) RETURNING *",
+      [customer.id, body, req.user.id],
+    );
+    await activity(req.user.id, "Customer Note Added", "customers", customer.id);
+    res.status(201).json(r.rows[0]);
   } catch (e) { next(e); }
 });
 
@@ -538,9 +566,82 @@ router.patch("/contacts/:id", requirePerm("contacts", "edit"), async (req, res, 
   } catch (e) { next(e); }
 });
 
+// ================= CRM LIST CATALOGS =================
+router.get("/lead-statuses-config", requireAuth, async (_req, res, next) => {
+  try { res.json(await db.all("SELECT id,name FROM lead_statuses ORDER BY id")); } catch (e) { next(e); }
+});
+router.post("/lead-statuses-config", requirePerm("settings", "edit"), async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || "").trim();
+    if (!name) throw new HttpError(422, "status name is required");
+    const r = await db.query("INSERT INTO lead_statuses (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING *", [name]);
+    res.status(201).json(r.rows[0]);
+  } catch (e) { next(e); }
+});
+router.delete("/lead-statuses-config/:id", requirePerm("settings", "edit"), async (req, res, next) => {
+  try {
+    const row = await db.one("SELECT * FROM lead_statuses WHERE id=$1", [Number(req.params.id)]);
+    if (!row) throw new HttpError(404, "Lead status not found");
+    const used = await db.one("SELECT COUNT(*)::int AS n FROM leads WHERE status=$1 AND deleted_at IS NULL", [row.name]);
+    if (Number(used?.n || 0) > 0) throw new HttpError(409, "This status is used by existing leads");
+    await db.query("DELETE FROM lead_statuses WHERE id=$1", [row.id]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+router.get("/lead-sources-config", requireAuth, async (_req, res, next) => {
+  try { res.json(await db.all("SELECT id,name FROM lead_sources ORDER BY id")); } catch (e) { next(e); }
+});
+router.post("/lead-sources-config", requirePerm("settings", "edit"), async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || "").trim();
+    if (!name) throw new HttpError(422, "source name is required");
+    const r = await db.query("INSERT INTO lead_sources (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING *", [name]);
+    res.status(201).json(r.rows[0]);
+  } catch (e) { next(e); }
+});
+router.delete("/lead-sources-config/:id", requirePerm("settings", "edit"), async (req, res, next) => {
+  try {
+    const row = await db.one("SELECT * FROM lead_sources WHERE id=$1", [Number(req.params.id)]);
+    if (!row) throw new HttpError(404, "Lead source not found");
+    const used = await db.one("SELECT COUNT(*)::int AS n FROM leads WHERE source=$1 AND deleted_at IS NULL", [row.name]);
+    if (Number(used?.n || 0) > 0) throw new HttpError(409, "This source is used by existing leads");
+    await db.query("DELETE FROM lead_sources WHERE id=$1", [row.id]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 // ================= DEALS =================
 router.get("/deals/stages", requirePerm("deals", "view"), async (_req, res, next) => {
   try { res.json(await db.all('SELECT id, key, name, "order", kind FROM deal_stages ORDER BY "order"')); } catch (e) { next(e); }
+});
+
+router.post("/deals/stages", requirePerm("settings", "edit"), async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || "").trim();
+    if (!name) throw new HttpError(422, "stage name is required");
+    const keyBase = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "stage";
+    let key = keyBase;
+    let suffix = 2;
+    while (await db.one("SELECT id FROM deal_stages WHERE key=$1", [key])) key = `${keyBase}_${suffix++}`;
+    const maxOrder = await db.one('SELECT COALESCE(MAX("order"),0)::int AS n FROM deal_stages WHERE kind=$1', ["open"]);
+    const r = await db.query(
+      'INSERT INTO deal_stages (key,name,"order",kind) VALUES ($1,$2,$3,$4) RETURNING *',
+      [key, name, Number(maxOrder?.n || 0) + 1, "open"],
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (e) { next(e); }
+});
+router.delete("/deals/stages/:id", requirePerm("settings", "edit"), async (req, res, next) => {
+  try {
+    const row = await db.one("SELECT * FROM deal_stages WHERE id=$1", [Number(req.params.id)]);
+    if (!row) throw new HttpError(404, "Deal stage not found");
+    if (row.kind !== "open") throw new HttpError(409, "Won/Lost system stages cannot be deleted");
+    const used = await db.one("SELECT COUNT(*)::int AS n FROM deals WHERE stage_id=$1", [row.id]);
+    if (Number(used?.n || 0) > 0) throw new HttpError(409, "This stage is used by existing deals");
+    await db.query("DELETE FROM deal_stages WHERE id=$1", [row.id]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
 });
 
 router.get("/deals", requirePerm("deals", "view"), async (req, res, next) => {
@@ -663,7 +764,14 @@ router.patch("/followups/:id", requirePerm("followups", "edit"), async (req, res
     if (b.status) {
       await db.query("UPDATE followups SET status = $1, completed_at = CASE WHEN $1 = 'Completed' THEN now() ELSE completed_at END WHERE id = $2", [b.status, fu.id]);
       if (b.status === "Completed" && fu.lead_id) {
-        await db.query("UPDATE leads SET status = 'Contacted' WHERE id = $1 AND status = 'New'", [fu.lead_id]);
+        const outcome = String(b.outcome || "").toLowerCase();
+        if (outcome === "not interested") {
+          await db.query("UPDATE leads SET status='Lost', updated_at=now() WHERE id=$1", [fu.lead_id]);
+        } else if (outcome === "interested") {
+          await db.query("UPDATE leads SET status='Interested', updated_at=now() WHERE id=$1 AND status IN ('New','Contacted','Follow-up')", [fu.lead_id]);
+        } else {
+          await db.query("UPDATE leads SET status='Contacted', updated_at=now() WHERE id=$1 AND status='New'", [fu.lead_id]);
+        }
         await activity(req.user.id, "Follow-up Completed", "followups", fu.id, { outcome: b.outcome || "" });
       }
       if (b.status === "Missed") await runTriggers("followup.missed", { extra: { title: "Follow-up missed", link: "/followups", kind: "followup" } });
@@ -715,9 +823,18 @@ router.patch("/tasks/:id", requirePerm("tasks", "edit"), async (req, res, next) 
     const allowed = ["title", "description", "status", "priority", "due_date", "assigned_to_id"];
     const patch = Object.entries(req.body || {}).filter(([k, v]) => allowed.includes(k) && v !== undefined);
     if (patch.length) {
-      const sets = patch.map(([k], i) => `${k} = $${i + 1}`).join(", ");
-      await db.query(`UPDATE tasks SET ${sets} WHERE id = $${patch.length + 1}`, [...patch.map(([, v]) => v), Number(req.params.id)]);
+      const sets = patch.map(([k], i) => `${k} = ${i + 1}`).join(", ");
+      await db.query(`UPDATE tasks SET ${sets} WHERE id = ${patch.length + 1}`, [...patch.map(([, v]) => v), Number(req.params.id)]);
     }
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+router.delete("/tasks/:id", requirePerm("tasks", "delete"), async (req, res, next) => {
+  try {
+    const task = await ensureTask(req, Number(req.params.id));
+    await db.query("DELETE FROM tasks WHERE id = $1", [task.id]);
+    await activity(req.user.id, "Task Deleted", "tasks", task.id, { title: task.title });
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
@@ -743,6 +860,36 @@ router.post("/meetings", requirePerm("meetings", "create"), async (req, res, nex
        b.date, b.start_time || "10:00", b.end_time || "11:00", b.location || "", b.meeting_link || "", b.agenda || ""]);
     await activity(req.user.id, "Meeting Created", "meetings", r.rows[0].id, { title: b.title, date: b.date });
     res.status(201).json({ id: r.rows[0].id });
+  } catch (e) { next(e); }
+});
+
+router.patch("/meetings/:id", requirePerm("meetings", "edit"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const current = await db.one("SELECT * FROM meetings WHERE id = $1", [id]);
+    if (!current) throw new HttpError(404, "Meeting not found");
+    const allowed = ["title", "lead_id", "customer_id", "participants", "date", "start_time", "end_time",
+      "location", "meeting_link", "agenda", "notes", "outcome"];
+    const patch = Object.entries(req.body || {}).filter(([k, v]) => allowed.includes(k) && v !== undefined);
+    if (patch.length) {
+      const values = patch.map(([k, v]) => k === "participants" ? JSON.stringify(v || []) : v);
+      const sets = patch.map(([k], i) => `${k} = ${i + 1}`).join(", ");
+      await db.query(`UPDATE meetings SET ${sets} WHERE id = ${patch.length + 1}`, [...values, id]);
+    }
+    await activity(req.user.id, "Meeting Edited", "meetings", id);
+    const row = await db.one("SELECT * FROM meetings WHERE id = $1", [id]);
+    res.json({ ...row, date: row.date ? String(row.date).slice(0, 10) : null });
+  } catch (e) { next(e); }
+});
+
+router.delete("/meetings/:id", requirePerm("meetings", "delete"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const row = await db.one("SELECT * FROM meetings WHERE id = $1", [id]);
+    if (!row) throw new HttpError(404, "Meeting not found");
+    await db.query("DELETE FROM meetings WHERE id = $1", [id]);
+    await activity(req.user.id, "Meeting Deleted", "meetings", id, { title: row.title });
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
