@@ -142,6 +142,15 @@ export const leadApi = {
   exportCSV: () => api.get("/leads/export", { responseType: "blob" }),
 };
 
+export const discoveryApi = {
+  list: () => api.get("/discovery/jobs"),
+  get: (id: number) => api.get(`/discovery/jobs/${id}`),
+  create: (b: unknown) => api.post("/discovery/jobs", b),
+  pause: (id: number) => api.post(`/discovery/jobs/${id}/pause`),
+  resume: (id: number) => api.post(`/discovery/jobs/${id}/resume`),
+  cancel: (id: number) => api.post(`/discovery/jobs/${id}/cancel`),
+};
+
 // ---------- customers / companies / contacts ----------
 export const customerApi = {
   list: (q?: Query) => api.get<Paged<unknown>>("/customers", { params: q }),
