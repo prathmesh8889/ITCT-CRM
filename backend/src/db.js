@@ -155,8 +155,27 @@ CREATE TABLE IF NOT EXISTS notes (
 CREATE TABLE IF NOT EXISTS products (
   id SERIAL PRIMARY KEY, name TEXT NOT NULL, sku TEXT UNIQUE NOT NULL, category TEXT DEFAULT 'General',
   description TEXT DEFAULT '', unit TEXT DEFAULT 'unit', unit_price NUMERIC(14,2) DEFAULT 0,
-  gst_percent NUMERIC(5,2) DEFAULT 18, active BOOLEAN DEFAULT TRUE
+  gst_percent NUMERIC(5,2) DEFAULT 18, active BOOLEAN DEFAULT TRUE,
+  service_name TEXT DEFAULT '', item_type TEXT DEFAULT 'Service', package_name TEXT DEFAULT '',
+  setup_price_label TEXT DEFAULT '', monthly_amc NUMERIC(14,2) DEFAULT 0, monthly_amc_label TEXT DEFAULT '',
+  best_fit_clients TEXT DEFAULT '', typical_delivery TEXT DEFAULT '', default_scope TEXT DEFAULT '',
+  exclusions TEXT DEFAULT '', currency TEXT DEFAULT 'INR', tax_mode TEXT DEFAULT 'Ex-tax',
+  is_starting_price BOOLEAN DEFAULT FALSE, requires_discovery BOOLEAN DEFAULT FALSE
 );
+ALTER TABLE products ADD COLUMN IF NOT EXISTS service_name TEXT DEFAULT '';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS item_type TEXT DEFAULT 'Service';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS package_name TEXT DEFAULT '';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS setup_price_label TEXT DEFAULT '';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS monthly_amc NUMERIC(14,2) DEFAULT 0;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS monthly_amc_label TEXT DEFAULT '';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS best_fit_clients TEXT DEFAULT '';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS typical_delivery TEXT DEFAULT '';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS default_scope TEXT DEFAULT '';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS exclusions TEXT DEFAULT '';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'INR';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS tax_mode TEXT DEFAULT 'Ex-tax';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS is_starting_price BOOLEAN DEFAULT FALSE;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS requires_discovery BOOLEAN DEFAULT FALSE;
 CREATE TABLE IF NOT EXISTS quotations (
   id SERIAL PRIMARY KEY, quotation_number TEXT UNIQUE NOT NULL,
   customer_id INT REFERENCES customers(id), company_id INT REFERENCES companies(id),
