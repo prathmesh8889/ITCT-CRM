@@ -80,10 +80,14 @@ export async function syncRoleCreate(): Promise<any> {
   return r.data;
 }
 
-export async function syncRuleSave(rule: Partial<AutomationRule>, editing: boolean): Promise<void> {
-  if (DEMO_MODE) return;
-  if (editing && rule.id) await automationApi.updateRule(nid(rule.id), ruleBody(rule));
-  else await automationApi.createRule(ruleBody(rule));
+export async function syncRuleSave(rule: Partial<AutomationRule>, editing: boolean): Promise<any> {
+  if (DEMO_MODE) return null;
+  if (editing && rule.id) {
+    const r = await automationApi.updateRule(nid(rule.id), ruleBody(rule));
+    return r.data;
+  }
+  const r = await automationApi.createRule(ruleBody(rule));
+  return r.data;
 }
 
 export async function syncRuleToggle(ruleId: string, enabled: boolean): Promise<void> {
