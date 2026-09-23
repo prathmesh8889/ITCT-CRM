@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { Save, Plug, RefreshCw, Database, Trash2, MessageCircle, Mail } from "lucide-react";
 import { useStore } from "../store";
-import { mutate, useDB, uid, resetDB, storageKB } from "../lib/db";
-import { ollamaPing, logAudit, downloadFile, todayISO } from "../lib/services";
-import { DEMO_MODE, settingsApi } from "../lib/api";
+import { mutate, useDB } from "../lib/db";
+import { ollamaPing, downloadFile, todayISO } from "../lib/services";
+import { settingsApi, crmCatalogApi, dealApi } from "../lib/api";
 import type { Template } from "../lib/types";
 import { Btn, Badge, Field, Input, Select, Textarea, Tabs, Toggle, Money } from "../components/ui";
 
 export default function Settings() {
-  const { user, can, toast } = useStore();
+  const { can, toast } = useStore();
   const d = useDB();
   const [tab, setTab] = useState("company");
   const editable = can("settings", "edit") || can("settings", "create");
@@ -26,12 +26,61 @@ export default function Settings() {
   const [newStage, setNewStage] = useState("");
 
   const persist = async (key: "company" | "ai" | "scoring" | "assignment", value: unknown) => {
-    if (!DEMO_MODE) await settingsApi.update({ [key]: value }); // PostgreSQL in production mode
+    await settingsApi.update({ [key]: value });
   };
   const saveCo = async () => { try { await persist("company", co); } catch (e) { toast(e instanceof Error ? e.message : "Server save failed", "err"); return; } mutate((db) => { db.settings.company = { ...co }; }); toast("Company settings saved", "ok", "Branding updates across quotations and invoices."); };
   const saveAi = async () => { try { await persist("ai", aiS); } catch (e) { toast(e instanceof Error ? e.message : "Server save failed", "err"); return; } mutate((db) => { db.settings.ai = { ...aiS }; }); toast("AI settings saved"); };
   const saveSc = async () => { const sc2 = { ...sc, targetLocations: sc.targetLocations.map((x) => x.trim()).filter(Boolean), targetIndustries: sc.targetIndustries.map((x) => x.trim()).filter(Boolean) }; try { await persist("scoring", { ...sc2, target_locations: sc2.targetLocations, target_industries: sc2.targetIndustries }); } catch (e) { toast(e instanceof Error ? e.message : "Server save failed", "err"); return; } mutate((db) => { db.settings.scoring = sc2; }); toast("Scoring rules saved", "ok", "New leads will use these weights."); };
   const saveAsg = async () => { try { await persist("assignment", { strategy: asg.strategy, rr_pointer: asg.rrPointer, high_value_threshold: asg.highValueThreshold, high_value_user_id: asg.highValueUserId ? Number(asg.highValueUserId) : null, category_map: Object.fromEntries(Object.entries(asg.categoryMap).map(([k, v]) => [k, Number(v)])), location_map: Object.fromEntries(Object.entries(asg.locationMap).map(([k, v]) => [k, Number(v)])) }); } catch (e) { toast(e instanceof Error ? e.message : "Server save failed", "err"); return; } mutate((db) => { db.settings.assignment = { ...asg }; }); toast("Assignment strategy saved"); };
+  const addStatus = async () => {
+    const name = newStatus.trim();
+    if (!name || d.leadStatuses.includes(name)) return;
+    try { await crmCatalogApi.createStatus(name); mutate((db) => db.leadStatuses.push(name)); setNewStatus(""); toast("Lead status added", "ok"); }
+    catch (e) { toast(e instanceof Error ? e.message : "Could not add status", "err"); }
+  };
+  const removeStatus = async (name: string) => {
+    try {
+      const rows: any[] = (await crmCatalogApi.statuses()).data as any[];
+      const row = rows.find((x) => x.name === name);
+      if (!row) return;
+      await crmCatalogApi.removeStatus(Number(row.id));
+      mutate((db) => { db.leadStatuses = db.leadStatuses.filter((x) => x !== name); });
+      toast("Lead status removed", "warn");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not remove status", "err"); }
+  };
+  const addSource = async () => {
+    const name = newSource.trim();
+    if (!name || d.leadSources.includes(name)) return;
+    try { await crmCatalogApi.createSource(name); mutate((db) => db.leadSources.push(name)); setNewSource(""); toast("Lead source added", "ok"); }
+    catch (e) { toast(e instanceof Error ? e.message : "Could not add source", "err"); }
+  };
+  const removeSource = async (name: string) => {
+    try {
+      const rows: any[] = (await crmCatalogApi.sources()).data as any[];
+      const row = rows.find((x) => x.name === name);
+      if (!row) return;
+      await crmCatalogApi.removeSource(Number(row.id));
+      mutate((db) => { db.leadSources = db.leadSources.filter((x) => x !== name); });
+      toast("Lead source removed", "warn");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not remove source", "err"); }
+  };
+  const addStage = async () => {
+    const name = newStage.trim();
+    if (!name) return;
+    try {
+      const r = await dealApi.createStage(name);
+      const row: any = r.data;
+      mutate((db) => db.dealStages.push({ id: String(row.id), name: row.name, order: Number(row.order), kind: row.kind || "open" }));
+      setNewStage(""); toast("Deal stage added", "ok");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not add stage", "err"); }
+  };
+  const removeStage = async (id: string) => {
+    try {
+      await dealApi.removeStage(Number(id));
+      mutate((db) => { db.dealStages = db.dealStages.filter((x) => x.id !== id); });
+      toast("Deal stage removed", "warn");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not remove stage", "err"); }
+  };
   const testAi = async () => { setPingRes(null); const r = await ollamaPing(aiS.url, 4000); setPingRes(r); toast(r.ok ? "Ollama connected" : "Ollama unreachable", r.ok ? "ok" : "warn", r.ok ? `${r.models.length} model(s) found` : r.error); };
 
   return (
@@ -163,30 +212,30 @@ export default function Settings() {
             {d.leadStatuses.map((s) => (
               <div key={s} className="mb-1.5 flex items-center justify-between rounded-md border border-ink-100 px-2.5 py-1.5 text-[12.5px] dark:border-ink-800">
                 <Badge tone="slate">{s}</Badge>
-                {editable && d.leads.every((l) => l.status !== s) && <button className="text-ink-300 hover:text-red-500" onClick={() => mutate((db) => { db.leadStatuses = db.leadStatuses.filter((x) => x !== s); })}><Trash2 size={12} /></button>}
+                {editable && d.leads.every((l) => l.status !== s) && <button className="text-ink-300 hover:text-red-500" onClick={() => void removeStatus(s)}><Trash2 size={12} /></button>}
               </div>
             ))}
-            {editable && <div className="mt-2 flex gap-2"><Input value={newStatus} onChange={(e) => setNewStatus(e.target.value)} placeholder="New status" /><Btn size="sm" variant="soft" onClick={() => { if (newStatus.trim() && !d.leadStatuses.includes(newStatus.trim())) { mutate((db) => db.leadStatuses.push(newStatus.trim())); setNewStatus(""); } }}>Add</Btn></div>}
+            {editable && <div className="mt-2 flex gap-2"><Input value={newStatus} onChange={(e) => setNewStatus(e.target.value)} placeholder="New status" /><Btn size="sm" variant="soft" onClick={() => void addStatus()}>Add</Btn></div>}
           </div>
           <div className="card p-4">
             <h3 className="hd mb-2 text-[14px]">Lead sources</h3>
             {d.leadSources.map((s) => (
               <div key={s} className="mb-1.5 flex items-center justify-between rounded-md border border-ink-100 px-2.5 py-1.5 text-[12.5px] dark:border-ink-800">
                 <span>{s}</span>
-                {editable && <button className="text-ink-300 hover:text-red-500" onClick={() => mutate((db) => { db.leadSources = db.leadSources.filter((x) => x !== s); })}><Trash2 size={12} /></button>}
+                {editable && <button className="text-ink-300 hover:text-red-500" onClick={() => void removeSource(s)}><Trash2 size={12} /></button>}
               </div>
             ))}
-            {editable && <div className="mt-2 flex gap-2"><Input value={newSource} onChange={(e) => setNewSource(e.target.value)} placeholder="New source" /><Btn size="sm" variant="soft" onClick={() => { if (newSource.trim() && !d.leadSources.includes(newSource.trim())) { mutate((db) => db.leadSources.push(newSource.trim())); setNewSource(""); } }}>Add</Btn></div>}
+            {editable && <div className="mt-2 flex gap-2"><Input value={newSource} onChange={(e) => setNewSource(e.target.value)} placeholder="New source" /><Btn size="sm" variant="soft" onClick={() => void addSource()}>Add</Btn></div>}
           </div>
           <div className="card p-4">
             <h3 className="hd mb-2 text-[14px]">Deal stages</h3>
             {[...d.dealStages].sort((a, b) => a.order - b.order).map((s) => (
               <div key={s.id} className="mb-1.5 flex items-center justify-between rounded-md border border-ink-100 px-2.5 py-1.5 text-[12.5px] dark:border-ink-800">
                 <span className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${s.kind === "won" ? "bg-emerald-500" : s.kind === "lost" ? "bg-red-400" : "bg-brand-500"}`} />{s.name}</span>
-                <Badge tone="slate">{s.kind}</Badge>
+                <span className="flex items-center gap-1.5"><Badge tone="slate">{s.kind}</Badge>{editable && s.kind === "open" && d.deals.every((x) => x.stageId !== s.id) && <button className="text-ink-300 hover:text-red-500" onClick={() => void removeStage(s.id)}><Trash2 size={12} /></button>}</span>
               </div>
             ))}
-            {editable && <div className="mt-2 flex gap-2"><Input value={newStage} onChange={(e) => setNewStage(e.target.value)} placeholder="New stage" /><Btn size="sm" variant="soft" onClick={() => { if (newStage.trim()) { mutate((db) => db.dealStages.push({ id: uid(), name: newStage.trim(), order: db.dealStages.filter((x) => x.kind === "open").length + 1, kind: "open" })); setNewStage(""); } }}>Add</Btn></div>}
+            {editable && <div className="mt-2 flex gap-2"><Input value={newStage} onChange={(e) => setNewStage(e.target.value)} placeholder="New stage" /><Btn size="sm" variant="soft" onClick={() => void addStage()}>Add</Btn></div>}
           </div>
         </div>
       )}
@@ -194,15 +243,11 @@ export default function Settings() {
       {tab === "data" && (
         <div className="max-w-2xl space-y-3">
           <div className="card flex items-center justify-between p-4">
-            <div className="flex items-center gap-3"><Database size={18} className="text-brand-600" /><div><div className="text-[13.5px] font-semibold">Local database</div><div className="num text-[11.5px] text-ink-400">{storageKB()} KB · {d.leads.length} leads · {d.customers.length} customers · {d.activities.length} activity entries · persists across restarts</div></div></div>
-            <Btn variant="outline" size="sm" onClick={() => { downloadFile(`itct-crm-backup-${todayISO()}.json`, JSON.stringify(d, null, 2), "application/json"); toast("Backup downloaded"); }}>Export backup</Btn>
-          </div>
-          <div className="card flex items-center justify-between border-amber-200 p-4 dark:border-amber-800">
-            <div><div className="text-[13.5px] font-semibold">Reset demo data</div><div className="text-[11.5px] text-ink-400">Wipes all changes and restores the original seeded workspace.</div></div>
-            <Btn variant="danger" size="sm" onClick={() => { if (window.confirm("Reset ALL data to the demo seed? This cannot be undone.")) { resetDB(); logAudit(user!.id, "Data Reset", "db", "Demo data restored"); toast("Database reset to demo seed", "warn"); } }}><Trash2 size={13} /> Reset</Btn>
+            <div className="flex items-center gap-3"><Database size={18} className="text-brand-600" /><div><div className="text-[13.5px] font-semibold">Live PostgreSQL workspace</div><div className="num text-[11.5px] text-ink-400">{d.leads.length} leads · {d.customers.length} customers · {d.invoices.length} invoices · auto-sync enabled</div></div></div>
+            <Btn variant="outline" size="sm" onClick={() => { downloadFile(`itct-crm-view-${todayISO()}.json`, JSON.stringify(d, null, 2), "application/json"); toast("Current CRM view exported"); }}>Export current view</Btn>
           </div>
           <div className="card p-4 text-[11.5px] leading-relaxed text-ink-500">
-            <b className="text-ink-700 dark:text-ink-200">Architecture note:</b> this build ships with an embedded, versioned database engine (tables, audit trail, background jobs) that mirrors the FastAPI/PostgreSQL service design — repositories, automation engine, discovery workers and Ollama client are all isolated behind the same service calls, ready to be pointed at a remote API.
+            <b className="text-ink-700 dark:text-ink-200">Production data mode:</b> PostgreSQL is the source of truth. There is no demo reset or browser-only CRM database. Successful writes are reloaded immediately and the workspace also refreshes automatically in the background.
           </div>
         </div>
       )}
@@ -217,7 +262,7 @@ export default function Settings() {
               <Field label="Body"><Textarea rows={7} value={tplBody.body} onChange={(e) => setTplBody((p) => ({ ...p, body: e.target.value }))} /></Field>
             </div>
             <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setTplEdit(null)}>Cancel</Btn>
-              <Btn onClick={() => { if (!DEMO_MODE) { settingsApi.update({ templates: [{ id: Number(tplEdit.id), ...tplBody }] }).catch((e) => toast(e instanceof Error ? e.message : "Server save failed", "err")); } mutate((db) => { const t = db.templates.find((x) => x.id === tplEdit.id); if (t) Object.assign(t, tplBody); }); toast("Template saved"); setTplEdit(null); }}><Save size={14} /> Save template</Btn></div>
+              <Btn onClick={() => void (async () => { try { await settingsApi.update({ templates: [{ id: Number(tplEdit.id), ...tplBody }] }); mutate((db) => { const t = db.templates.find((x) => x.id === tplEdit.id); if (t) Object.assign(t, tplBody); }); toast("Template saved", "ok"); setTplEdit(null); } catch (e) { toast(e instanceof Error ? e.message : "Server save failed", "err"); } })()}><Save size={14} /> Save template</Btn></div>
           </div>
         </div>
       )}
