@@ -2,33 +2,47 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Plus, Printer, Receipt, Wallet, TrendingDown, MessageCircle, Send, Pencil, X, Download } from "lucide-react";
 import { useStore } from "../store";
-import { mutate, useDB, uid } from "../lib/db";
-import { docTotals, paidFor, sweepInvoices, nextDocNumber, logAct, logAudit, waLink, renderTemplate, runTriggers, toCSV, downloadFile, fmtD, todayISO, addDaysISO, inr } from "../lib/services";
+import { mutate, useDB } from "../lib/db";
+import { docTotals, paidFor, logAct, waLink, renderTemplate, toCSV, downloadFile, fmtD, todayISO, addDaysISO, inr } from "../lib/services";
+import { invoiceApi, expenseApi } from "../lib/api";
+import { fromApiInvoice, fromApiPayment, toApiItems } from "../lib/mappers";
 import type { Invoice, Payment, PayMode, DocItem } from "../lib/types";
 import { Btn, Badge, Modal, Drawer, Field, Input, Select, Textarea, Tabs, EmptyState, Money, statusTone, Menu, MenuItem } from "../components/ui";
 import { DocEditor, DocPrint } from "../components/docui";
 import { usePrint } from "../components/ui";
 
 function InvoiceModal({ initial, onDone, editing }: { initial: Partial<Invoice>; onDone: () => void; editing: boolean }) {
-  const { user, toast } = useStore();
+  const { toast } = useStore();
   const d = useDB();
   const [f, setF] = useState(initial);
   const [items, setItems] = useState<DocItem[]>(initial.items || []);
   const [disc, setDisc] = useState(initial.discountPct || 0);
-  const save = () => {
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
     if (!f.customerId) { toast("Select a customer", "err"); return; }
     if (items.length === 0) { toast("Add at least one line item", "err"); return; }
-    if (editing && f.id) {
-      mutate((db) => { const x = db.invoices.find((y) => y.id === f.id); if (x) Object.assign(x, { ...f, items, discountPct: disc }); });
-      logAudit(user!.id, "Invoice Modified", f.number || "", "Items/terms edited");
-      toast("Invoice updated");
-    } else {
-      const num = nextDocNumber(d, "INV");
-      mutate((db) => { db.invoices.unshift({ id: uid(), number: num, customerId: f.customerId!, date: f.date || todayISO(), dueDate: f.dueDate || addDaysISO(15), items, discountPct: disc, status: "Draft", notes: f.notes || "", createdBy: user!.id, createdAt: new Date().toISOString() }); });
-      logAct("invoice", num, user!.id, "Invoice generated", inr(docTotals(items, disc).total));
-      toast("Invoice created", "ok", num);
-    }
-    onDone();
+    setBusy(true);
+    try {
+      const body = {
+        customer_id: Number(f.customerId),
+        invoice_date: f.date || todayISO(),
+        due_date: f.dueDate || addDaysISO(15),
+        items: toApiItems(items),
+        notes: f.notes || "",
+        status: editing ? (f.status || "Draft") : "Draft",
+      };
+      const r = editing && f.id
+        ? await invoiceApi.update(Number(f.id), body)
+        : await invoiceApi.create(body);
+      const row = { ...fromApiInvoice(r.data as any), discountPct: disc };
+      mutate((db) => {
+        const index = db.invoices.findIndex((x) => x.id === row.id);
+        if (index >= 0) db.invoices[index] = row; else db.invoices.unshift(row);
+      });
+      toast(editing ? "Invoice updated" : "Invoice created", "ok", row.number);
+      onDone();
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not save invoice", "err"); }
+    finally { setBusy(false); }
   };
   return (
     <div>
@@ -39,7 +53,7 @@ function InvoiceModal({ initial, onDone, editing }: { initial: Partial<Invoice>;
       </div>
       <DocEditor items={items} discountPct={disc} onChange={(i, dd) => { setItems(i); setDisc(dd); }} />
       <Field label="Notes" className="mt-3"><Textarea value={f.notes || ""} onChange={(e) => setF((p) => ({ ...p, notes: e.target.value }))} /></Field>
-      <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={onDone}>Cancel</Btn><Btn onClick={save}>{editing ? "Save changes" : "Create invoice"}</Btn></div>
+      <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={onDone}>Cancel</Btn><Btn loading={busy} onClick={() => void save()}>{editing ? "Save changes" : "Create invoice"}</Btn></div>
     </div>
   );
 }
@@ -56,19 +70,28 @@ function PaymentModal({ invoiceId, onDone }: { invoiceId?: string; onDone: () =>
   const [txn, setTxn] = useState("");
   const [notes, setNotes] = useState("");
   const [init, setInit] = useState(false);
+  const [busy, setBusy] = useState(false);
   if (inv && !init) { setInit(true); setAmount(balance); }
-  const save = () => {
+  const save = async () => {
     if (!inv) { toast("Pick an invoice", "err"); return; }
     if (!amount || amount <= 0) { toast("Enter a valid amount", "err"); return; }
-    mutate((db) => {
-      db.payments.unshift({ id: uid(), invoiceId: inv.id, customerId: inv.customerId, amount, date, mode, txnId: txn, notes, recordedBy: user!.id, createdAt: new Date().toISOString() });
-      sweepInvoices(db);
-      logAct("invoice", inv.id, user!.id, "Payment received", `${inr(amount)} via ${mode}`);
-      logAudit(user!.id, "Payment Recorded", inv.number, `${inr(amount)} via ${mode}`);
-      db.notices.unshift({ id: uid(), userId: "managers", title: `Payment received — ${inv.number}`, body: `${inr(amount)} via ${mode} from ${db.customers.find((c) => c.id === inv.customerId)?.company || ""}`, read: false, at: new Date().toISOString(), link: "/invoices?tab=payments", kind: "invoice" });
-    });
-    toast("Payment recorded", "ok", `${inr(amount)} · ${mode}`);
-    onDone();
+    setBusy(true);
+    try {
+      const r = await invoiceApi.recordPayment(Number(inv.id), {
+        amount, payment_date: date, payment_method: mode, transaction_reference: txn, notes,
+      });
+      const payload: any = r.data;
+      const payment = fromApiPayment(payload.payment);
+      const freshInvoice = { ...fromApiInvoice(payload.invoice), discountPct: inv.discountPct };
+      mutate((db) => {
+        db.payments.unshift({ ...payment, recordedBy: user!.id });
+        const index = db.invoices.findIndex((x) => x.id === freshInvoice.id);
+        if (index >= 0) db.invoices[index] = freshInvoice;
+      });
+      toast("Payment recorded", "ok", `${inr(amount)} · ${mode}`);
+      onDone();
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not record payment", "err"); }
+    finally { setBusy(false); }
   };
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -84,7 +107,7 @@ function PaymentModal({ invoiceId, onDone }: { invoiceId?: string; onDone: () =>
       <Field label="Transaction ID"><Input value={txn} onChange={(e) => setTxn(e.target.value)} placeholder="UPI-12345 / NEFT…" /></Field>
       <Field label="Notes" className="col-span-2"><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
       {inv && <div className="num col-span-2 rounded-md bg-ink-50 px-3 py-2 text-[12px] text-ink-500 dark:bg-ink-800/60">Invoice total {inr(docTotals(inv.items, inv.discountPct).total)} · paid {inr(paidFor(d, inv.id))} · balance {inr(balance)}</div>}
-      <div className="col-span-2 flex justify-end gap-2"><Btn variant="ghost" onClick={onDone}>Cancel</Btn><Btn onClick={save}><Wallet size={14} /> Record payment</Btn></div>
+      <div className="col-span-2 flex justify-end gap-2"><Btn variant="ghost" onClick={onDone}>Cancel</Btn><Btn loading={busy} onClick={() => void save()}><Wallet size={14} /> Record payment</Btn></div>
     </div>
   );
 }
@@ -116,21 +139,51 @@ export default function Invoices() {
     window.open(waLink(c?.whatsapp || c?.phone || "", body), "_blank");
     logAct("invoice", inv.id, user!.id, "WhatsApp action opened", `Payment reminder ${inv.number}`);
   };
-  const markSent = (inv: Invoice) => {
-    mutate((db) => { const x = db.invoices.find((y) => y.id === inv.id); if (x && x.status === "Draft") x.status = "Sent"; });
-    logAct("invoice", inv.id, user!.id, "Invoice sent", inv.number);
-    toast("Invoice marked sent");
+  const markSent = async (inv: Invoice) => {
+    try {
+      const r = await invoiceApi.update(Number(inv.id), { status: "Sent" });
+      const row = { ...fromApiInvoice(r.data as any), discountPct: inv.discountPct };
+      mutate((db) => { const index = db.invoices.findIndex((x) => x.id === inv.id); if (index >= 0) db.invoices[index] = row; });
+      toast("Invoice marked sent", "ok");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not update invoice", "err"); }
   };
   const doPrint = (inv: Invoice) => {
     const c = d.customers.find((x) => x.id === inv.customerId);
     if (!c) return;
     print(<DocPrint kind="Tax Invoice" number={inv.number} customer={c} settings={d.settings.company} date={inv.date} extraLabel="Due date" extraValue={fmtD(inv.dueDate)} items={inv.items} discountPct={inv.discountPct} terms="Payment due by the date above. Late payments may attract 1.5% monthly interest." notes={inv.notes} status={inv.status} />);
   };
-  const saveExpense = () => {
+  const [expenseBusy, setExpenseBusy] = useState(false);
+  const saveExpense = async () => {
     if (!exp.vendor.trim() || !exp.amount) { toast("Vendor and amount required", "err"); return; }
-    mutate((db) => db.expenses.unshift({ id: uid(), ...exp, recordedBy: user!.id, createdAt: new Date().toISOString() }));
-    logAct("expense", "new", user!.id, "Expense recorded", `${exp.category} · ${inr(exp.amount)}`);
-    toast("Expense added"); setExpModal(false); setExp({ category: "Software", vendor: "", amount: 0, date: todayISO(), notes: "" });
+    setExpenseBusy(true);
+    try {
+      const r = await expenseApi.create({
+        category: exp.category, description: exp.vendor.trim(), amount: exp.amount, date: exp.date,
+        payment_method: "UPI", notes: exp.notes,
+      });
+      mutate((db) => db.expenses.unshift({
+        id: String((r.data as any).id), ...exp, recordedBy: user!.id, createdAt: new Date().toISOString(),
+      }));
+      toast("Expense added", "ok"); setExpModal(false);
+      setExp({ category: "Software", vendor: "", amount: 0, date: todayISO(), notes: "" });
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not add expense", "err"); }
+    finally { setExpenseBusy(false); }
+  };
+  const removeExpense = async (id: string) => {
+    if (!window.confirm("Delete expense?")) return;
+    try {
+      await expenseApi.remove(Number(id));
+      mutate((db) => { db.expenses = db.expenses.filter((x) => x.id !== id); });
+      toast("Expense deleted", "warn");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not delete expense", "err"); }
+  };
+  const cancelInvoice = async (inv: Invoice) => {
+    try {
+      const r = await invoiceApi.update(Number(inv.id), { status: "Cancelled" });
+      const row = { ...fromApiInvoice(r.data as any), discountPct: inv.discountPct };
+      mutate((db) => { const index = db.invoices.findIndex((x) => x.id === inv.id); if (index >= 0) db.invoices[index] = row; });
+      toast("Invoice cancelled", "warn");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not cancel invoice", "err"); }
   };
 
   return (
@@ -167,9 +220,9 @@ export default function Invoices() {
                       <MenuItem onClick={() => doPrint(inv)}><Printer size={13} /> PDF / Print</MenuItem>
                       {can("payments", "create") && bal > 0 && <MenuItem onClick={() => setPayForId(inv.id)}><Wallet size={13} /> Record payment</MenuItem>}
                       {bal > 0 && <MenuItem onClick={() => sendReminder(inv)}><MessageCircle size={13} /> WhatsApp reminder</MenuItem>}
-                      {inv.status === "Draft" && can("invoices", "edit") && <MenuItem onClick={() => markSent(inv)}><Send size={13} /> Mark sent</MenuItem>}
+                      {inv.status === "Draft" && can("invoices", "edit") && <MenuItem onClick={() => void markSent(inv)}><Send size={13} /> Mark sent</MenuItem>}
                       {inv.status === "Draft" && can("invoices", "edit") && <MenuItem onClick={() => setEditId(inv.id)}><Pencil size={13} /> Edit draft</MenuItem>}
-                      {inv.status === "Draft" && can("invoices", "edit") && <MenuItem danger onClick={() => { mutate((db) => { const x = db.invoices.find((y) => y.id === inv.id); if (x) x.status = "Cancelled"; }); logAudit(user!.id, "Invoice Modified", inv.number, "Cancelled"); toast("Invoice cancelled", "warn"); }}><X size={13} /> Cancel invoice</MenuItem>}
+                      {inv.status === "Draft" && can("invoices", "edit") && <MenuItem danger onClick={() => void cancelInvoice(inv)}><X size={13} /> Cancel invoice</MenuItem>}
                     </Menu>
                   </td>
                 </tr>
@@ -218,7 +271,7 @@ export default function Invoices() {
                 <td className="td font-medium">{x.vendor}</td>
                 <td className="td text-[12px] text-ink-400">{x.notes || "—"}</td>
                 <td className="td num text-right font-bold text-red-500">{inr(x.amount)}</td>
-                <td className="td">{can("expenses", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => { if (window.confirm("Delete expense?")) mutate((db) => { db.expenses = db.expenses.filter((y) => y.id !== x.id); }); }}><X size={13} /></button>}</td>
+                <td className="td">{can("expenses", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => void removeExpense(x.id)}><X size={13} /></button>}</td>
               </tr>
             ))}</tbody>
           </table>
@@ -239,7 +292,7 @@ export default function Invoices() {
             <Field label="Date"><Input type="date" value={exp.date} onChange={(e) => setExp((p) => ({ ...p, date: e.target.value }))} /></Field>
             <Field label="Notes" className="col-span-2"><Textarea value={exp.notes} onChange={(e) => setExp((p) => ({ ...p, notes: e.target.value }))} /></Field>
           </div>
-          <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setExpModal(false)}>Cancel</Btn><Btn onClick={saveExpense}>Save expense</Btn></div>
+          <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setExpModal(false)}>Cancel</Btn><Btn loading={expenseBusy} onClick={() => void saveExpense()}>Save expense</Btn></div>
         </Modal>
       )}
       {open && (
@@ -266,7 +319,7 @@ export default function Invoices() {
             {d.payments.filter((p) => p.invoiceId === open.id).length === 0 && <p className="text-[12.5px] text-ink-400">No payments yet.</p>}
             <div className="mt-4 flex flex-wrap gap-2">
               <Btn variant="outline" size="sm" onClick={() => sendReminder(open)}><MessageCircle size={13} /> WhatsApp reminder</Btn>
-              {open.status === "Draft" && can("invoices", "edit") && <Btn size="sm" onClick={() => markSent(open)}><Send size={13} /> Mark sent</Btn>}
+              {open.status === "Draft" && can("invoices", "edit") && <Btn size="sm" onClick={() => void markSent(open)}><Send size={13} /> Mark sent</Btn>}
             </div>
             {open.notes && <p className="mt-3 rounded-md bg-ink-50 p-3 text-[12px] text-ink-500 dark:bg-ink-800/60">{open.notes}</p>}
           </div>
