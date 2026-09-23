@@ -97,6 +97,10 @@ export interface Note { id: ID; entityType: string; entityId: ID; body: string; 
 export interface Product {
   id: ID; name: string; sku: string; category: string; description: string;
   unit: string; price: number; gstPct: number; active: boolean;
+  serviceName: string; itemType: "Service" | "Add-on" | "Product"; packageName: string;
+  setupPriceLabel: string; monthlyAmc: number; monthlyAmcLabel: string;
+  bestFitClients: string; typicalDelivery: string; defaultScope: string; exclusions: string;
+  currency: string; taxMode: string; isStartingPrice: boolean; requiresDiscovery: boolean;
 }
 
 export interface DocItem { id: ID; name: string; productId?: ID; qty: number; rate: number; discountPct: number; gstPct: number; }

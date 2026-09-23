@@ -42,7 +42,7 @@ export function DocEditor({ items, discountPct, onChange }: {
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
         <Select className="!w-auto" defaultValue="" onChange={(e) => { if (e.target.value) { addFromProduct(e.target.value); e.target.value = ""; } }}>
           <option value="" disabled>+ Add from product catalog…</option>
-          {d.products.filter((p) => p.active).map((p) => <option key={p.id} value={p.id}>{p.name} · {inr(p.price)}</option>)}
+          {d.products.filter((p) => p.active).map((p) => <option key={p.id} value={p.id}>{p.sku} · {p.name} · Setup {p.setupPriceLabel || inr(p.price)}{p.monthlyAmcLabel ? ` · AMC ${p.monthlyAmcLabel}` : ""}</option>)}
         </Select>
         <Btn variant="ghost" size="sm" onClick={() => onChange([...items, { id: uid(), name: "Custom line item", qty: 1, rate: 0, discountPct: 0, gstPct: 18 }], discountPct)}><Plus size={13} /> Blank line</Btn>
       </div>

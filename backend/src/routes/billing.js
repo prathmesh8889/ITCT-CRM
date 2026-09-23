@@ -68,7 +68,7 @@ const dstr = (v) => (v ? String(v).slice(0, 10) : null);
 router.get("/products", requirePerm("products", "view"), async (_req, res, next) => {
   try {
     const rows = await db.all("SELECT * FROM products ORDER BY name");
-    res.json(rows.map((p) => ({ ...p, unit_price: num(p.unit_price), gst_percent: num(p.gst_percent) })));
+    res.json(rows.map((p) => ({ ...p, unit_price: num(p.unit_price), monthly_amc: num(p.monthly_amc), gst_percent: num(p.gst_percent) })));
   } catch (e) { next(e); }
 });
 
@@ -78,11 +78,22 @@ router.post("/products", requirePerm("products", "create"), async (req, res, nex
     if (!b.name?.trim() || !b.sku?.trim()) throw new HttpError(422, "name and sku are required");
     if (Number(b.unit_price) < 0) throw new HttpError(422, "unit_price cannot be negative");
     const r = await db.query(
-      `INSERT INTO products (name, sku, category, description, unit, unit_price, gst_percent, active)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [b.name, b.sku, b.category || "General", b.description || "", b.unit || "unit",
-       money(b.unit_price || 0), b.gst_percent ?? 18, b.active ?? true]);
-    res.status(201).json(r.rows[0]);
+      `INSERT INTO products (
+        name, sku, category, description, unit, unit_price, gst_percent, active,
+        service_name, item_type, package_name, setup_price_label, monthly_amc, monthly_amc_label,
+        best_fit_clients, typical_delivery, default_scope, exclusions, currency, tax_mode,
+        is_starting_price, requires_discovery
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
+      ) RETURNING *`,
+      [b.name, b.sku, b.category || "General", b.description || "", b.unit || "project",
+       money(b.unit_price || 0), b.gst_percent ?? 18, b.active ?? true,
+       b.service_name || "", b.item_type || "Service", b.package_name || "", b.setup_price_label || "",
+       money(b.monthly_amc || 0), b.monthly_amc_label || "", b.best_fit_clients || "",
+       b.typical_delivery || "", b.default_scope || "", b.exclusions || "", b.currency || "INR",
+       b.tax_mode || "Ex-tax", b.is_starting_price ?? false, b.requires_discovery ?? false]);
+    const out = r.rows[0];
+    res.status(201).json({ ...out, unit_price: num(out.unit_price), monthly_amc: num(out.monthly_amc), gst_percent: num(out.gst_percent) });
   } catch (e) { next(e); }
 });
 
@@ -90,13 +101,17 @@ router.patch("/products/:id", requirePerm("products", "edit"), async (req, res, 
   try {
     const p = await db.one("SELECT * FROM products WHERE id = $1", [Number(req.params.id)]);
     if (!p) throw new HttpError(404, "Product not found");
-    const allowed = ["name", "sku", "category", "description", "unit", "unit_price", "gst_percent", "active"];
+    const allowed = ["name", "sku", "category", "description", "unit", "unit_price", "gst_percent", "active",
+      "service_name", "item_type", "package_name", "setup_price_label", "monthly_amc", "monthly_amc_label",
+      "best_fit_clients", "typical_delivery", "default_scope", "exclusions", "currency", "tax_mode",
+      "is_starting_price", "requires_discovery"];
     const patch = Object.entries(req.body || {}).filter(([k, v]) => allowed.includes(k) && v !== undefined);
     if (patch.length) {
-      const sets = patch.map(([k], i) => `${k} = ${i + 1}`).join(", ");
-      await db.query(`UPDATE products SET ${sets} WHERE id = ${patch.length + 1}`, [...patch.map(([, v]) => v), p.id]);
+      const sets = patch.map(([k], i) => k + " = $" + (i + 1)).join(", ");
+      await db.query("UPDATE products SET " + sets + " WHERE id = $" + (patch.length + 1), [...patch.map(([, v]) => v), p.id]);
     }
-    res.json(await db.one("SELECT * FROM products WHERE id = $1", [p.id]));
+    const out = await db.one("SELECT * FROM products WHERE id = $1", [p.id]);
+    res.json({ ...out, unit_price: num(out.unit_price), monthly_amc: num(out.monthly_amc), gst_percent: num(out.gst_percent) });
   } catch (e) { next(e); }
 });
 
