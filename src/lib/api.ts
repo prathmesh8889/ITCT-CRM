@@ -51,8 +51,17 @@ async function doRefresh(): Promise<string> {
   return r.data.access_token;
 }
 
+export const CRM_DATA_CHANGED_EVENT = "itct:crm-data-changed";
+
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    const method = String(res.config.method || "get").toLowerCase();
+    const url = String(res.config.url || "");
+    if (["post", "put", "patch", "delete"].includes(method) && !url.includes("/auth/")) {
+      try { window.dispatchEvent(new CustomEvent(CRM_DATA_CHANGED_EVENT)); } catch { /* non-browser test runtime */ }
+    }
+    return res;
+  },
   async (err: AxiosError<{ detail?: string }>) => {
     const status = err.response?.status;
     const msg = err.response?.data?.detail || err.message;
