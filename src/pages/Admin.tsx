@@ -241,11 +241,22 @@ export function AutomationPage() {
 
   const save = async () => {
     if (!f.name?.trim()) { toast("Rule name required", "err"); return; }
-    try { await syncRuleSave({ ...f, id: editId || undefined }, !!editId); }
-    catch (e) { toast(e instanceof Error ? e.message : "Server rejected the rule", "err"); return; }
-    if (editId) { mutate((db) => { const r = db.rules.find((x) => x.id === editId); if (r) Object.assign(r, f); }); logAudit(user!.id, "Automation Modified", editId, f.name!); toast("Rule updated"); }
-    else { mutate((db) => db.rules.push({ id: uid(), name: f.name!, trigger: f.trigger as TriggerKey, condField: f.condField || "", condOp: f.condOp || "eq", condValue: f.condValue || "", actions: f.actions || [], enabled: f.enabled ?? true })); toast("Rule created"); }
-    setModal(false); setEditId(null);
+    try {
+      const saved = await syncRuleSave({ ...f, id: editId || undefined }, !!editId);
+      if (editId) {
+        mutate((db) => { const r = db.rules.find((x) => x.id === editId); if (r) Object.assign(r, f); });
+        logAudit(user!.id, "Automation Modified", editId, f.name!);
+        toast("Rule updated", "ok");
+      } else {
+        mutate((db) => db.rules.push({
+          id: String(saved?.id), name: f.name!, trigger: f.trigger as TriggerKey,
+          condField: f.condField || "", condOp: f.condOp || "eq", condValue: f.condValue || "",
+          actions: f.actions || [], enabled: f.enabled ?? true,
+        }));
+        toast("Rule created", "ok");
+      }
+      setModal(false); setEditId(null);
+    } catch (e) { toast(e instanceof Error ? e.message : "Server rejected the rule", "err"); }
   };
   const describeAction = (a: RuleAction) => {
     const t = ACTION_TYPES.find((x) => x.k === a.type)?.label || a.type;
