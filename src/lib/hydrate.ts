@@ -10,7 +10,7 @@ import { mutate } from "./db";
 import {
   customerApi, companyApi, contactApi, dealApi, followUpApi, taskApi, meetingApi,
   productApi, quotationApi, invoiceApi, paymentApi, expenseApi, userApi, roleApi, teamApi,
-  automationApi, auditApi, settingsApi, leadApi, discoveryApi,
+  automationApi, auditApi, settingsApi, leadApi, discoveryApi, crmCatalogApi,
 } from "./api";
 import { fromApiUser, fromApiLead, fromApiCustomer, fromApiDeal, fromApiStage,
          fromApiQuotation, fromApiInvoice, fromApiPayment } from "./mappers";
@@ -30,7 +30,7 @@ export async function hydrateFromBackend(
 
   const [leads, discoveryJobs, customers, companies, contacts, deals, stages, followups, tasks, meetings,
          products, quotations, invoices, payments, expenses, users, roles, teams,
-         rules, executions, audit, settings, customerNotes] = await Promise.all([
+         rules, executions, audit, settings, customerNotes, leadStatuses, leadSources] = await Promise.all([
     canView("leads") ? leadApi.list({ page: 1, page_size: 200 }) : empty(),
     canView("discovery") ? discoveryApi.list() : empty(),
     canView("customers") ? customerApi.list({ page: 1, page_size: 200 }) : empty(),
@@ -54,6 +54,8 @@ export async function hydrateFromBackend(
     canView("audit") ? auditApi.list({ page: 1, page_size: 100 }) : empty(),
     canView("settings") ? settingsApi.get() : emptySettings(),
     canView("customers") ? customerApi.notes() : empty(),
+    crmCatalogApi.statuses(),
+    crmCatalogApi.sources(),
   ]);
 
   const paged = (r: any) => (Array.isArray(r?.data) ? r.data : r?.data?.items || []);
@@ -122,9 +124,8 @@ export async function hydrateFromBackend(
       at: a.created_at }));
     db.templates = (settings.data?.templates || []).map((t: any) => ({ id: S(t.id)!, channel: t.channel,
       name: t.name, subject: t.subject || "", body: t.body || "" }));
-    db.leadStatuses = ["New", "Contacted", "Interested", "Follow-up", "Qualified", "Proposal", "Negotiation", "Won", "Lost"];
-    db.leadSources = ["Google Maps", "Website Form", "Referral", "Justdial", "LinkedIn", "Cold Outreach",
-      "CSV Import", "Discovery", "IndiaMART", "Walk-in"];
+    db.leadStatuses = paged(leadStatuses).map((x: any) => String(x.name));
+    db.leadSources = paged(leadSources).map((x: any) => String(x.name));
     db.settings = {
       company: { name: co.name || "IT CYBER TECHNOLOGIES PVT LTD", tagline: co.tagline || "",
         email: co.email || "", phone: co.phone || "", website: co.website || "", address: co.address || "",
