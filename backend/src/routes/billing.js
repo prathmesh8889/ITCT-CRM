@@ -107,8 +107,8 @@ router.patch("/products/:id", requirePerm("products", "edit"), async (req, res, 
       "is_starting_price", "requires_discovery"];
     const patch = Object.entries(req.body || {}).filter(([k, v]) => allowed.includes(k) && v !== undefined);
     if (patch.length) {
-      const sets = patch.map(([k], i) => `${k} = ${i + 1}`).join(", ");
-      await db.query(`UPDATE products SET ${sets} WHERE id = ${patch.length + 1}`, [...patch.map(([, v]) => v), p.id]);
+      const sets = patch.map(([k], i) => k + " = $" + (i + 1)).join(", ");
+      await db.query("UPDATE products SET " + sets + " WHERE id = $" + (patch.length + 1), [...patch.map(([, v]) => v), p.id]);
     }
     const out = await db.one("SELECT * FROM products WHERE id = $1", [p.id]);
     res.json({ ...out, unit_price: num(out.unit_price), monthly_amc: num(out.monthly_amc), gst_percent: num(out.gst_percent) });
