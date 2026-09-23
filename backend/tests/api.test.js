@@ -187,3 +187,28 @@ test("frontend mutation endpoints exist in the Express routers", () => {
   }
   assert.ok(admin.includes('router.patch("/teams/:id"'), "missing PATCH /teams/:id");
 });
+
+
+test("ITCYBER master catalogue has 22 families, 88 package variants and 11 add-ons", () => {
+  const { SOURCE, CATALOGUE } = require("../src/product-catalogue");
+  assert.strictEqual(SOURCE.services.length, 22);
+  assert.strictEqual(SOURCE.services.reduce((n, s) => n + s.packages.length, 0), 88);
+  assert.strictEqual(SOURCE.addons.length, 11);
+  assert.strictEqual(CATALOGUE.length, 99);
+  assert.strictEqual(new Set(CATALOGUE.map((p) => p.sku)).size, CATALOGUE.length);
+  assert.ok(CATALOGUE.filter((p) => p.itemType === "Service").every((p) =>
+    p.defaultScope && p.setupPriceLabel && p.category && p.typicalDelivery && p.bestFitClients
+  ));
+  assert.ok(CATALOGUE.filter((p) => p.packageName === "Custom").every((p) =>
+    p.isStartingPrice && p.requiresDiscovery
+  ));
+});
+
+test("service catalogue keeps setup and AMC as separate product fields", () => {
+  const { CATALOGUE } = require("../src/product-catalogue");
+  const businessBasic = CATALOGUE.find((p) => p.sku === "WEB-BIZ-BSC");
+  assert.strictEqual(businessBasic.unitPrice, 14999);
+  assert.strictEqual(businessBasic.monthlyAmc, 699);
+  assert.strictEqual(businessBasic.setupPriceLabel, "₹14,999");
+  assert.strictEqual(businessBasic.monthlyAmcLabel, "₹699 / month");
+});
