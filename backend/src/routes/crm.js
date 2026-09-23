@@ -691,7 +691,14 @@ router.patch("/followups/:id", requirePerm("followups", "edit"), async (req, res
     if (b.status) {
       await db.query("UPDATE followups SET status = $1, completed_at = CASE WHEN $1 = 'Completed' THEN now() ELSE completed_at END WHERE id = $2", [b.status, fu.id]);
       if (b.status === "Completed" && fu.lead_id) {
-        await db.query("UPDATE leads SET status = 'Contacted' WHERE id = $1 AND status = 'New'", [fu.lead_id]);
+        const outcome = String(b.outcome || "").toLowerCase();
+        if (outcome === "not interested") {
+          await db.query("UPDATE leads SET status='Lost', updated_at=now() WHERE id=$1", [fu.lead_id]);
+        } else if (outcome === "interested") {
+          await db.query("UPDATE leads SET status='Interested', updated_at=now() WHERE id=$1 AND status IN ('New','Contacted','Follow-up')", [fu.lead_id]);
+        } else {
+          await db.query("UPDATE leads SET status='Contacted', updated_at=now() WHERE id=$1 AND status='New'", [fu.lead_id]);
+        }
         await activity(req.user.id, "Follow-up Completed", "followups", fu.id, { outcome: b.outcome || "" });
       }
       if (b.status === "Missed") await runTriggers("followup.missed", { extra: { title: "Follow-up missed", link: "/followups", kind: "followup" } });
