@@ -398,6 +398,7 @@ router.get("/customers", requirePerm("customers", "view"), async (req, res, next
       [...params, pageSize, (page - 1) * pageSize]);
     res.json({ items: items.map((c) => ({ id: c.id, customer_code: c.customer_code, name: c.name, company: c.company,
       email: c.email, phone: c.phone, whatsapp: c.whatsapp, gst_number: c.gst_number, pan_number: c.pan_number,
+      billing_address: c.billing_address, shipping_address: c.shipping_address, country: c.country,
       city: c.city, state: c.state, account_manager_id: c.account_manager_id, status: c.status, notes: c.notes,
       lead_id: c.lead_id, created_at: c.created_at })), total, page, page_size: pageSize });
   } catch (e) { next(e); }
@@ -450,6 +451,33 @@ router.delete("/customers/:id", requirePerm("customers", "delete"), async (req, 
     await db.query("UPDATE customers SET deleted_at = now() WHERE id = $1", [c.id]);
     await activity(req.user.id, "Customer Deleted", "customers", c.id, { name: c.name });
     res.json({ ok: true, soft_deleted: true });
+  } catch (e) { next(e); }
+});
+
+// Customer notes are persisted in PostgreSQL and hydrated with the relationship panel.
+router.get("/customer-notes", requirePerm("customers", "view"), async (req, res, next) => {
+  try {
+    const own = applyOwnership(req, "account_manager_id");
+    const rows = own.sql
+      ? await db.all(`SELECT n.* FROM notes n JOIN customers c ON c.id=n.entity_id
+                       WHERE n.entity_type='customer' AND c.deleted_at IS NULL AND c.account_manager_id=$1
+                       ORDER BY n.created_at DESC`, [req.user.id])
+      : await db.all("SELECT * FROM notes WHERE entity_type='customer' ORDER BY created_at DESC");
+    res.json(rows);
+  } catch (e) { next(e); }
+});
+
+router.post("/customers/:id/notes", requirePerm("customers", "edit"), async (req, res, next) => {
+  try {
+    const customer = await ensureCustomer(req, Number(req.params.id));
+    const body = String(req.body?.body || "").trim();
+    if (!body) throw new HttpError(422, "note body is required");
+    const r = await db.query(
+      "INSERT INTO notes (entity_type, entity_id, body, author_id) VALUES ('customer',$1,$2,$3) RETURNING *",
+      [customer.id, body, req.user.id],
+    );
+    await activity(req.user.id, "Customer Note Added", "customers", customer.id);
+    res.status(201).json(r.rows[0]);
   } catch (e) { next(e); }
 });
 
