@@ -1,15 +1,26 @@
 import { useState } from "react";
 import { Radar, Plus, Play, Pause, Square, RotateCcw, ChevronDown, ChevronUp, MapPin, AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import { useStore } from "../store";
-import { useDB } from "../lib/db";
-import { createDiscoveryJob, startJobRunner, pauseJob, cancelJob, fmtDT } from "../lib/services";
+import { mutate, useDB } from "../lib/db";
+import { fmtDT } from "../lib/services";
+import { discoveryApi } from "../lib/api";
 import type { DiscoveryJob } from "../lib/types";
 import { Btn, Badge, Modal, Field, Input, Select, Textarea, EmptyState, Progress, statusTone, Reveal } from "../components/ui";
+
+const fromApiJob = (j: any): DiscoveryJob => ({
+  id: String(j.id), createdBy: String(j.created_by), category: j.category || "", location: j.location || "",
+  target: Number(j.target) || 0, source: j.source || "maps", keywords: j.keywords || "",
+  status: j.status || "Queued", discovered: Number(j.discovered) || 0, valid: Number(j.valid) || 0,
+  duplicates: Number(j.duplicates) || 0, invalid: Number(j.invalid) || 0,
+  failedRecords: Number(j.failed_records) || 0, startedAt: j.started_at || null,
+  completedAt: j.completed_at || null, error: j.error || "", attempts: 0,
+  retryLog: Array.isArray(j.retry_log) ? j.retry_log : [],
+});
 
 const CATS = ["Digital Marketing Agency", "Software Company", "Manufacturing", "Interior Design", "Restaurant & Café", "Healthcare Clinic", "Fitness & Gym", "Education Institute", "Real Estate", "E-commerce Store", "CA & Accounting Firm", "Logistics & Transport"];
 
 function JobCard({ job, delay }: { job: DiscoveryJob; delay: number }) {
-  const { user, toast } = useStore();
+  const { toast } = useStore();
   const d = useDB();
   const [showLog, setShowLog] = useState(false);
   const pct = Math.round((job.discovered / Math.max(1, job.target)) * 100);
@@ -30,12 +41,35 @@ function JobCard({ job, delay }: { job: DiscoveryJob; delay: number }) {
             </div>
           </div>
           <div className="flex gap-1.5">
-            {job.status === "Queued" && <Btn size="xs" onClick={() => { startJobRunner(job.id); toast("Job started", "info"); }}><Play size={12} /> Start</Btn>}
-            {active && <Btn size="xs" variant="outline" onClick={() => { pauseJob(job.id); toast("Job paused", "warn", "Progress preserved — resume anytime."); }}><Pause size={12} /> Pause</Btn>}
-            {job.status === "Paused" && <Btn size="xs" onClick={() => { startJobRunner(job.id); toast("Job resumed"); }}><Play size={12} /> Resume</Btn>}
-            {["Running", "Paused", "Queued"].includes(job.status) && <Btn size="xs" variant="ghost" onClick={() => { cancelJob(job.id); toast("Job cancelled", "warn"); }}><Square size={12} /> Cancel</Btn>}
+            {job.status === "Queued" && <Badge tone="blue"><Play size={10} /> Starting automatically</Badge>}
+            {active && <Btn size="xs" variant="outline" onClick={() => void (async () => {
+              try {
+                const r = await discoveryApi.pause(Number(job.id)); const row = fromApiJob(r.data);
+                mutate((db) => { const i = db.discoveryJobs.findIndex((x) => x.id === job.id); if (i >= 0) db.discoveryJobs[i] = row; });
+                toast("Job paused", "warn", "Progress preserved — resume anytime.");
+              } catch (e) { toast(e instanceof Error ? e.message : "Could not pause job", "err"); }
+            })()}><Pause size={12} /> Pause</Btn>}
+            {job.status === "Paused" && <Btn size="xs" onClick={() => void (async () => {
+              try {
+                const r = await discoveryApi.resume(Number(job.id)); const row = fromApiJob(r.data);
+                mutate((db) => { const i = db.discoveryJobs.findIndex((x) => x.id === job.id); if (i >= 0) db.discoveryJobs[i] = row; });
+                toast("Job resumed", "ok");
+              } catch (e) { toast(e instanceof Error ? e.message : "Could not resume job", "err"); }
+            })()}><Play size={12} /> Resume</Btn>}
+            {["Running", "Paused", "Queued"].includes(job.status) && <Btn size="xs" variant="ghost" onClick={() => void (async () => {
+              try {
+                const r = await discoveryApi.cancel(Number(job.id)); const row = fromApiJob(r.data);
+                mutate((db) => { const i = db.discoveryJobs.findIndex((x) => x.id === job.id); if (i >= 0) db.discoveryJobs[i] = row; });
+                toast("Job cancelled", "warn");
+              } catch (e) { toast(e instanceof Error ? e.message : "Could not cancel job", "err"); }
+            })()}><Square size={12} /> Cancel</Btn>}
             {["Failed", "Cancelled", "Partially Completed", "Completed"].includes(job.status) && (
-              <Btn size="xs" variant="outline" onClick={() => { const id = createDiscoveryJob({ category: job.category, location: job.location, target: job.target, source: job.source, keywords: job.keywords }, user!.id); startJobRunner(id); toast("Job re-queued"); }}><RotateCcw size={12} /> Re-run</Btn>
+              <Btn size="xs" variant="outline" onClick={() => void (async () => {
+                try {
+                  const r = await discoveryApi.create({ category: job.category, location: job.location, target: job.target, source: job.source, keywords: job.keywords });
+                  const row = fromApiJob(r.data); mutate((db) => db.discoveryJobs.unshift(row)); toast("Job re-queued", "ok");
+                } catch (e) { toast(e instanceof Error ? e.message : "Could not re-run job", "err"); }
+              })()}><RotateCcw size={12} /> Re-run</Btn>
             )}
           </div>
         </div>
@@ -87,14 +121,20 @@ export default function Discovery() {
   const [target, setTarget] = useState(100);
   const [source, setSource] = useState<DiscoveryJob["source"]>("maps");
   const [keywords, setKeywords] = useState("");
+  const [busy, setBusy] = useState(false);
   const jobs = d.discoveryJobs;
 
-  const launch = () => {
+  const launch = async () => {
     if (!location.trim()) { toast("Location is required", "err"); return; }
-    const id = createDiscoveryJob({ category, location, target, source, keywords }, user!.id);
-    startJobRunner(id);
-    setOpen(false);
-    toast("Discovery job launched", "ok", `${category} · ${location} · target ${target}`);
+    setBusy(true);
+    try {
+      const r = await discoveryApi.create({ category, location: location.trim(), target, source, keywords });
+      const row = fromApiJob(r.data);
+      mutate((db) => db.discoveryJobs.unshift(row));
+      setOpen(false);
+      toast("Discovery job launched", "ok", `${category} · ${location} · target ${target}`);
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not launch discovery job", "err"); }
+    finally { setBusy(false); }
   };
 
   return (
@@ -148,7 +188,7 @@ export default function Discovery() {
             <CheckCircle2 size={13} className="mt-0.5 shrink-0" />
             Runs in the background and persists progress. Discovered leads pass duplicate checks and validation before entering the CRM; a job is only marked completed when the target is genuinely met.
           </div>
-          <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setOpen(false)}>Cancel</Btn><Btn onClick={launch}><Radar size={14} /> Launch job</Btn></div>
+          <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setOpen(false)}>Cancel</Btn><Btn loading={busy} onClick={() => void launch()}><Radar size={14} /> Launch job</Btn></div>
         </Modal>
       )}
       {/* keep Textarea referenced for future notes field */}
