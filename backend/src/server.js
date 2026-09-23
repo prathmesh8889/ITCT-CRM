@@ -5,6 +5,7 @@ const { db, initSchema } = require("./db");
 const { config, assertProductionConfig, HttpError } = require("./core");
 const { sweepOverdueInvoices } = require("./engines");
 const { cleanupDemoData, cleanupWorkforceDemoData } = require("./cleanup-demo");
+const { seedProductCatalogue } = require("./product-catalogue");
 const { ensureAuthSchema } = require("./auth-schema");
 const { ensureAccessLevelSchema } = require("./access-levels");
 const { ensureOrganizationSchema } = require("./organization-schema");
@@ -113,6 +114,13 @@ async function main() {
     console.log(`[boot] production data cleanup: ${JSON.stringify({ legacy, workforce })}`);
   } catch (e) {
     console.error("[boot] FATAL — demo-data cleanup failed:", e.message);
+    process.exit(1);
+  }
+  try {
+    const catalogue = await seedProductCatalogue();
+    console.log(`[boot] product catalogue: ${JSON.stringify(catalogue)}`);
+  } catch (e) {
+    console.error("[boot] FATAL — product catalogue import failed:", e.message);
     process.exit(1);
   }
   try {
