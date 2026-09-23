@@ -30,7 +30,7 @@ export async function hydrateFromBackend(
 
   const [leads, customers, companies, contacts, deals, stages, followups, tasks, meetings,
          products, quotations, invoices, payments, expenses, users, roles, teams,
-         rules, executions, audit, settings] = await Promise.all([
+         rules, executions, audit, settings, customerNotes] = await Promise.all([
     canView("leads") ? leadApi.list({ page: 1, page_size: 200 }) : empty(),
     canView("customers") ? customerApi.list({ page: 1, page_size: 200 }) : empty(),
     canView("companies") ? companyApi.list({ page: 1, page_size: 200 }) : empty(),
@@ -52,6 +52,7 @@ export async function hydrateFromBackend(
     canView("automation") ? automationApi.executions() : empty(),
     canView("audit") ? auditApi.list({ page: 1, page_size: 100 }) : empty(),
     canView("settings") ? settingsApi.get() : emptySettings(),
+    canView("customers") ? customerApi.notes() : empty(),
   ]);
 
   const paged = (r: any) => (Array.isArray(r?.data) ? r.data : r?.data?.items || []);
@@ -74,6 +75,8 @@ export async function hydrateFromBackend(
     db.contacts = paged(contacts).map((c: any) => ({ id: S(c.id)!, name: `${c.first_name} ${c.last_name || ""}`.trim(),
       title: c.designation || "", companyId: S(c.company_id) || undefined, phone: c.phone || "", email: c.email || "",
       whatsapp: c.whatsapp || "", city: c.city || "", notes: c.notes || "", createdAt: c.created_at }));
+    db.notes = paged(customerNotes).map((n: any) => ({ id: S(n.id)!, entityType: "customer" as const,
+      entityId: S(n.entity_id)!, body: n.body || "", authorId: S(n.author_id) || "", createdAt: n.created_at }));
     db.dealStages = paged(stages).map((s: any) => fromApiStage(s));
     db.deals = paged(deals).map((d: any) => fromApiDeal(d));
     db.followups = paged(followups).map((f: any) => ({ id: S(f.id)!, entityType: f.entity_type || "lead",
