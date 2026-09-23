@@ -566,9 +566,82 @@ router.patch("/contacts/:id", requirePerm("contacts", "edit"), async (req, res, 
   } catch (e) { next(e); }
 });
 
+// ================= CRM LIST CATALOGS =================
+router.get("/lead-statuses-config", requireAuth, async (_req, res, next) => {
+  try { res.json(await db.all("SELECT id,name FROM lead_statuses ORDER BY id")); } catch (e) { next(e); }
+});
+router.post("/lead-statuses-config", requirePerm("settings", "edit"), async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || "").trim();
+    if (!name) throw new HttpError(422, "status name is required");
+    const r = await db.query("INSERT INTO lead_statuses (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING *", [name]);
+    res.status(201).json(r.rows[0]);
+  } catch (e) { next(e); }
+});
+router.delete("/lead-statuses-config/:id", requirePerm("settings", "edit"), async (req, res, next) => {
+  try {
+    const row = await db.one("SELECT * FROM lead_statuses WHERE id=$1", [Number(req.params.id)]);
+    if (!row) throw new HttpError(404, "Lead status not found");
+    const used = await db.one("SELECT COUNT(*)::int AS n FROM leads WHERE status=$1 AND deleted_at IS NULL", [row.name]);
+    if (Number(used?.n || 0) > 0) throw new HttpError(409, "This status is used by existing leads");
+    await db.query("DELETE FROM lead_statuses WHERE id=$1", [row.id]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+router.get("/lead-sources-config", requireAuth, async (_req, res, next) => {
+  try { res.json(await db.all("SELECT id,name FROM lead_sources ORDER BY id")); } catch (e) { next(e); }
+});
+router.post("/lead-sources-config", requirePerm("settings", "edit"), async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || "").trim();
+    if (!name) throw new HttpError(422, "source name is required");
+    const r = await db.query("INSERT INTO lead_sources (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING *", [name]);
+    res.status(201).json(r.rows[0]);
+  } catch (e) { next(e); }
+});
+router.delete("/lead-sources-config/:id", requirePerm("settings", "edit"), async (req, res, next) => {
+  try {
+    const row = await db.one("SELECT * FROM lead_sources WHERE id=$1", [Number(req.params.id)]);
+    if (!row) throw new HttpError(404, "Lead source not found");
+    const used = await db.one("SELECT COUNT(*)::int AS n FROM leads WHERE source=$1 AND deleted_at IS NULL", [row.name]);
+    if (Number(used?.n || 0) > 0) throw new HttpError(409, "This source is used by existing leads");
+    await db.query("DELETE FROM lead_sources WHERE id=$1", [row.id]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 // ================= DEALS =================
 router.get("/deals/stages", requirePerm("deals", "view"), async (_req, res, next) => {
   try { res.json(await db.all('SELECT id, key, name, "order", kind FROM deal_stages ORDER BY "order"')); } catch (e) { next(e); }
+});
+
+router.post("/deals/stages", requirePerm("settings", "edit"), async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || "").trim();
+    if (!name) throw new HttpError(422, "stage name is required");
+    const keyBase = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "stage";
+    let key = keyBase;
+    let suffix = 2;
+    while (await db.one("SELECT id FROM deal_stages WHERE key=$1", [key])) key = `${keyBase}_${suffix++}`;
+    const maxOrder = await db.one('SELECT COALESCE(MAX("order"),0)::int AS n FROM deal_stages WHERE kind=$1', ["open"]);
+    const r = await db.query(
+      'INSERT INTO deal_stages (key,name,"order",kind) VALUES ($1,$2,$3,$4) RETURNING *',
+      [key, name, Number(maxOrder?.n || 0) + 1, "open"],
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (e) { next(e); }
+});
+router.delete("/deals/stages/:id", requirePerm("settings", "edit"), async (req, res, next) => {
+  try {
+    const row = await db.one("SELECT * FROM deal_stages WHERE id=$1", [Number(req.params.id)]);
+    if (!row) throw new HttpError(404, "Deal stage not found");
+    if (row.kind !== "open") throw new HttpError(409, "Won/Lost system stages cannot be deleted");
+    const used = await db.one("SELECT COUNT(*)::int AS n FROM deals WHERE stage_id=$1", [row.id]);
+    if (Number(used?.n || 0) > 0) throw new HttpError(409, "This stage is used by existing deals");
+    await db.query("DELETE FROM deal_stages WHERE id=$1", [row.id]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
 });
 
 router.get("/deals", requirePerm("deals", "view"), async (req, res, next) => {
