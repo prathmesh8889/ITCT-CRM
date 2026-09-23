@@ -9,7 +9,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import type { ReactNode } from "react";
 import { getDB, hashPass, mutate, uid } from "./lib/db";
 import { logAudit, runSweeps, resumeStaleJobs } from "./lib/services";
-import { DEMO_MODE, authApi, backendAvailable, clearTokens, hasSession, setTokens } from "./lib/api";
+import { DEMO_MODE, CRM_DATA_CHANGED_EVENT, authApi, backendAvailable, clearTokens, hasSession, setTokens } from "./lib/api";
 import { fromApiUser } from "./lib/mappers";
 import { hydrateFromBackend } from "./lib/hydrate";
 import type { MeResponse } from "./lib/apiTypes";
@@ -178,6 +178,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
     };
+  }, [user?.id, mustChangePassword, syncBackendData]);
+
+
+  // Any successful API mutation (create/edit/delete) asks the store to pull the
+  // authoritative PostgreSQL state immediately. This keeps every panel in sync
+  // without waiting for the periodic refresh.
+  useEffect(() => {
+    if (DEMO_MODE || !user || mustChangePassword) return;
+    const onChanged = () => { void syncBackendData(); };
+    window.addEventListener(CRM_DATA_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(CRM_DATA_CHANGED_EVENT, onChanged);
   }, [user?.id, mustChangePassword, syncBackendData]);
 
   const login = useCallback(async (email: string, pw: string) => {
