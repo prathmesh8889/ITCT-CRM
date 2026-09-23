@@ -7,7 +7,7 @@ const express = require("express");
 const multer = require("multer");
 const { db } = require("../db");
 const { HttpError, money, nextCode, normPhone, normDomain, normName, validateLead, parseCSV, toCSV } = require("../core");
-const { requirePerm, applyOwnership, ensureLead, ensureCustomer, ensureDeal, ensureFollowup, ensureTask } = require("../security");
+const { requireAuth, requirePerm, applyOwnership, ensureLead, ensureCustomer, ensureDeal, ensureFollowup, ensureTask } = require("../security");
 const { runTriggers, aiQualifyLead } = require("../engines");
 
 const router = express.Router();

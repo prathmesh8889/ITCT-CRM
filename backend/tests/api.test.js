@@ -4,6 +4,10 @@
  * TEST_DATABASE_URL is set (point it at a scratch database).
  */
 const { test } = require("node:test");
+test("CRM route module loads without startup reference errors", () => {
+  assert.doesNotThrow(() => require("../src/routes/crm"));
+});
+
 const assert = require("node:assert");
 
 const { money, computeTotals, validateLead, normPhone, normDomain, parseCSV, toCSV } = require("../src/core");
