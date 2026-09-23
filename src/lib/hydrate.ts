@@ -106,8 +106,15 @@ export async function hydrateFromBackend(
       end: m.end_time || "11:00", location: m.location || "", link: m.meeting_link || "", agenda: m.agenda || "",
       notes: m.notes || "", outcome: m.outcome || "", createdAt: m.created_at }));
     db.products = paged(products).map((p: any) => ({ id: S(p.id)!, name: p.name, sku: p.sku,
-      category: p.category || "General", description: p.description || "", unit: p.unit || "unit",
-      price: Number(p.unit_price) || 0, gstPct: Number(p.gst_percent) || 18, active: !!p.active }));
+      category: p.category || "General", description: p.description || "", unit: p.unit || "project",
+      price: Number(p.unit_price) || 0, gstPct: Number(p.gst_percent) || 18, active: !!p.active,
+      serviceName: p.service_name || p.name || "", itemType: p.item_type || "Service",
+      packageName: p.package_name || "", setupPriceLabel: p.setup_price_label || "",
+      monthlyAmc: Number(p.monthly_amc) || 0, monthlyAmcLabel: p.monthly_amc_label || "",
+      bestFitClients: p.best_fit_clients || "", typicalDelivery: p.typical_delivery || "",
+      defaultScope: p.default_scope || "", exclusions: p.exclusions || "",
+      currency: p.currency || "INR", taxMode: p.tax_mode || "Ex-tax",
+      isStartingPrice: !!p.is_starting_price, requiresDiscovery: !!p.requires_discovery }));
     db.quotations = paged(quotations).map((q: any) => fromApiQuotation(q));
     db.invoices = paged(invoices).map((i: any) => fromApiInvoice(i));
     db.payments = paged(payments).map((p: any) => fromApiPayment(p));
