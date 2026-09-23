@@ -87,6 +87,34 @@ export function commit(): void {
   } else {
     purgeProductionCache();
   }
+
+  // Every mutation gets fresh top-level/list references. Many panels memoize
+  // filtered rows by array identity; mutating an array in place otherwise makes
+  // counters update while the actual table stays stale until a later refresh.
+  state = {
+    ...state,
+    users: [...state.users], roles: [...state.roles], teams: [...state.teams],
+    leads: [...state.leads], leadSources: [...state.leadSources], leadStatuses: [...state.leadStatuses],
+    discoveryJobs: [...state.discoveryJobs], customers: [...state.customers], companies: [...state.companies],
+    contacts: [...state.contacts], deals: [...state.deals], dealStages: [...state.dealStages],
+    followups: [...state.followups], calls: [...state.calls], meetings: [...state.meetings],
+    tasks: [...state.tasks], notes: [...state.notes], products: [...state.products],
+    quotations: [...state.quotations], invoices: [...state.invoices], payments: [...state.payments],
+    expenses: [...state.expenses], activities: [...state.activities], notices: [...state.notices],
+    auditLogs: [...state.auditLogs], rules: [...state.rules], ruleRuns: [...state.ruleRuns],
+    templates: [...state.templates], aiLogs: [...state.aiLogs],
+    settings: {
+      ...state.settings,
+      company: { ...state.settings.company },
+      ai: { ...state.settings.ai },
+      scoring: { ...state.settings.scoring },
+      assignment: {
+        ...state.settings.assignment,
+        categoryMap: { ...state.settings.assignment.categoryMap },
+        locationMap: { ...state.settings.assignment.locationMap },
+      },
+    },
+  };
   snap = { db: state, rev: snap.rev + 1 };
   listeners.forEach((l) => l());
 }
