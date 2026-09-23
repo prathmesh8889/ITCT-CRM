@@ -2,8 +2,9 @@ import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, PhoneCall, Check, X, CalendarDays, ChevronLeft, ChevronRight, LayoutGrid, List, Clock, Pencil, Trash2, Video } from "lucide-react";
 import { useStore } from "../store";
-import { mutate, useDB, uid } from "../lib/db";
-import { logAct, runTriggers, fmtD, todayISO, addDaysISO } from "../lib/services";
+import { mutate, useDB } from "../lib/db";
+import { fmtD, todayISO, addDaysISO } from "../lib/services";
+import { followUpApi, taskApi, meetingApi } from "../lib/api";
 import type { FollowUp, FUType, FUStatus, Task, Meeting, Priority } from "../lib/types";
 import { Btn, Badge, Modal, Field, Input, Select, Textarea, Tabs, EmptyState, Avatar, statusTone, Toggle } from "../components/ui";
 
@@ -19,24 +20,45 @@ function CompleteFU({ fu, onDone }: { fu: FollowUp; onDone: () => void }) {
   const [next, setNext] = useState(true);
   const [nextDate, setNextDate] = useState(addDaysISO(outcome === "Interested" ? 2 : 1));
   const [nextType, setNextType] = useState<FUType>("Call");
-  const finish = () => {
-    mutate((db) => {
-      const f = db.followups.find((x) => x.id === fu.id);
-      if (f) { f.status = "Completed"; f.outcome = outcome; f.notes = notes; f.completedAt = new Date().toISOString(); }
-      if (fu.entityType === "lead") {
-        const l = db.leads.find((x) => x.id === fu.entityId);
-        if (l) {
-          if (l.status === "New") l.status = "Contacted";
-          if (outcome === "Interested" && l.status === "Contacted") l.status = "Interested";
-          if (outcome === "Not interested") l.status = "Lost";
-          l.updatedAt = new Date().toISOString();
-        }
+  const [busy, setBusy] = useState(false);
+  const finish = async () => {
+    setBusy(true);
+    try {
+      await followUpApi.update(Number(fu.id), { status: "Completed", outcome, notes });
+      let nextId: string | null = null;
+      if (next) {
+        const r = await followUpApi.create({
+          entity_type: fu.entityType,
+          lead_id: fu.entityType === "lead" ? Number(fu.entityId) : null,
+          customer_id: fu.entityType === "customer" ? Number(fu.entityId) : null,
+          employee_id: Number(fu.employeeId),
+          type: nextType, date: nextDate, time: "11:00", reminder: true,
+          notes: `Chained from ${fu.type} (${outcome})`,
+        });
+        nextId = String((r.data as any).id);
       }
-      if (next) db.followups.unshift({ id: uid(), entityType: fu.entityType, entityId: fu.entityId, employeeId: fu.employeeId, type: nextType, date: nextDate, time: "11:00", reminder: true, status: "Scheduled", notes: `Chained from ${fu.type} (${outcome})`, outcome: "", createdAt: new Date().toISOString() });
-    });
-    logAct("followup", fu.id, user!.id, "Follow-up completed", `${fu.type} · ${outcome}`);
-    toast("Follow-up completed", "ok", next ? `Next ${nextType} scheduled for ${fmtD(nextDate)}.` : undefined);
-    onDone();
+      mutate((db) => {
+        const row = db.followups.find((x) => x.id === fu.id);
+        if (row) { row.status = "Completed"; row.outcome = outcome; row.notes = notes; row.completedAt = new Date().toISOString(); }
+        if (fu.entityType === "lead") {
+          const lead = db.leads.find((x) => x.id === fu.entityId);
+          if (lead) {
+            if (outcome === "Not interested") lead.status = "Lost";
+            else if (outcome === "Interested") lead.status = "Interested";
+            else if (lead.status === "New") lead.status = "Contacted";
+            lead.updatedAt = new Date().toISOString();
+          }
+        }
+        if (next && nextId) db.followups.unshift({
+          id: nextId, entityType: fu.entityType, entityId: fu.entityId, employeeId: fu.employeeId,
+          type: nextType, date: nextDate, time: "11:00", reminder: true, status: "Scheduled",
+          notes: `Chained from ${fu.type} (${outcome})`, outcome: "", createdAt: new Date().toISOString(),
+        });
+      });
+      toast("Follow-up completed", "ok", next ? `Next ${nextType} scheduled for ${fmtD(nextDate)}.` : undefined);
+      onDone();
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not complete follow-up", "err"); }
+    finally { setBusy(false); }
   };
   return (
     <div className="space-y-3">
@@ -48,7 +70,7 @@ function CompleteFU({ fu, onDone }: { fu: FollowUp; onDone: () => void }) {
         <Field label="Next type"><Select value={nextType} onChange={(e) => setNextType(e.target.value as FUType)}>{["Call", "WhatsApp", "Email", "Demo", "Meeting", "Proposal"].map((t) => <option key={t}>{t}</option>)}</Select></Field>
         <Field label="Next date"><Input type="date" value={nextDate} onChange={(e) => setNextDate(e.target.value)} /></Field>
       </div>}
-      <div className="flex justify-end gap-2"><Btn variant="ghost" onClick={onDone}>Cancel</Btn><Btn onClick={finish}><Check size={14} /> Complete</Btn></div>
+      <div className="flex justify-end gap-2"><Btn variant="ghost" onClick={onDone}>Cancel</Btn><Btn loading={busy} onClick={() => void finish()}><Check size={14} /> Complete</Btn></div>
       <span className="hidden">{d.settings.company.name}</span>
     </div>
   );
@@ -80,11 +102,12 @@ export function FollowUps() {
     return l;
   }, [d.followups, filter, fEmp, isExec, user, today]);
 
-  const setStatus = (id: string, status: FUStatus) => {
-    mutate((db) => { const f = db.followups.find((x) => x.id === id); if (f) f.status = status; });
-    logAct("followup", id, user!.id, "Follow-up updated", `Status → ${status}`);
-    if (status === "Missed") runTriggers("followup.missed", {}, undefined);
-    toast(`Marked ${status.toLowerCase()}`, status === "Missed" ? "warn" : "info");
+  const setStatus = async (id: string, status: FUStatus) => {
+    try {
+      await followUpApi.update(Number(id), { status });
+      mutate((db) => { const row = db.followups.find((x) => x.id === id); if (row) row.status = status; });
+      toast(`Marked ${status.toLowerCase()}`, status === "Missed" ? "warn" : "info");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not update follow-up", "err"); }
   };
 
   const fu = completeId ? d.followups.find((f) => f.id === completeId) : null;
@@ -122,7 +145,7 @@ export function FollowUps() {
                   <div className="flex gap-1">
                     {f.status !== "Missed" || true ? <Btn size="xs" variant="soft" onClick={() => setCompleteId(f.id)}><Check size={12} /> Done</Btn> : null}
                     <Btn size="xs" variant="ghost" onClick={() => { setReschedId(f.id); setRsDate(addDaysISO(1)); }}><Clock size={12} /></Btn>
-                    <Btn size="xs" variant="ghost" onClick={() => setStatus(f.id, "Cancelled")}><X size={12} /></Btn>
+                    <Btn size="xs" variant="ghost" onClick={() => void setStatus(f.id, "Cancelled")}><X size={12} /></Btn>
                   </div>
                 )}
               </div>
@@ -136,7 +159,13 @@ export function FollowUps() {
         <Modal open onClose={() => setReschedId(null)} title="Reschedule follow-up">
           <Field label="New date"><Input type="date" value={rsDate} onChange={(e) => setRsDate(e.target.value)} /></Field>
           <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setReschedId(null)}>Cancel</Btn>
-            <Btn onClick={() => { mutate((db) => { const f = db.followups.find((x) => x.id === reschedId); if (f) { f.date = rsDate; f.status = "Rescheduled"; } }); logAct("followup", reschedId, user!.id, "Follow-up rescheduled", `New date ${rsDate}`); toast("Rescheduled"); setReschedId(null); }}>Reschedule</Btn></div>
+            <Btn onClick={() => void (async () => {
+              try {
+                await followUpApi.update(Number(reschedId), { date: rsDate });
+                mutate((db) => { const row = db.followups.find((x) => x.id === reschedId); if (row) { row.date = rsDate; row.status = "Rescheduled"; } });
+                toast("Rescheduled", "ok"); setReschedId(null);
+              } catch (e) { toast(e instanceof Error ? e.message : "Could not reschedule follow-up", "err"); }
+            })()}>Reschedule</Btn></div>
         </Modal>
       )}
     </div>
@@ -158,15 +187,26 @@ function FollowUpModal({ onClose, presetEntity }: { onClose: () => void; presetE
   const [time, setTime] = useState("10:30");
   const [reminder, setReminder] = useState(true);
   const [notes, setNotes] = useState("");
-  const save = () => {
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
     if (!entityId) { toast("Pick a lead or customer", "err"); return; }
-    mutate((db) => {
-      db.followups.unshift({ id: uid(), entityType, entityId, employeeId: emp, type, date, time, reminder, status: "Scheduled", notes, outcome: "", createdAt: new Date().toISOString() });
-      if (entityType === "lead") { const l = db.leads.find((x) => x.id === entityId); if (l) l.nextFollowUp = date; }
-    });
-    logAct("followup", entityId, user!.id, "Follow-up created", `${type} on ${date}`);
-    toast("Follow-up scheduled", "ok", `${type} · ${fmtD(date)} ${time}`);
-    onClose();
+    if (!emp) { toast("Pick an employee", "err"); return; }
+    setBusy(true);
+    try {
+      const r = await followUpApi.create({
+        entity_type: entityType,
+        lead_id: entityType === "lead" ? Number(entityId) : null,
+        customer_id: entityType === "customer" ? Number(entityId) : null,
+        employee_id: Number(emp), type, date, time, reminder, notes,
+      });
+      mutate((db) => {
+        db.followups.unshift({ id: String((r.data as any).id), entityType, entityId, employeeId: emp, type, date, time, reminder, status: "Scheduled", notes, outcome: "", createdAt: new Date().toISOString() });
+        if (entityType === "lead") { const lead = db.leads.find((x) => x.id === entityId); if (lead) lead.nextFollowUp = date; }
+      });
+      toast("Follow-up scheduled", "ok", `${type} · ${fmtD(date)} ${time}`);
+      onClose();
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not schedule follow-up", "err"); }
+    finally { setBusy(false); }
   };
   return (
     <Modal open onClose={onClose} title="Schedule follow-up">
@@ -185,7 +225,7 @@ function FollowUpModal({ onClose, presetEntity }: { onClose: () => void; presetE
         <Field label="Notes" className="col-span-2"><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
       </div>
       <div className="mt-3"><Toggle on={reminder} onChange={setReminder} label="Send reminder notification" /></div>
-      <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={onClose}>Cancel</Btn><Btn onClick={save}>Schedule</Btn></div>
+      <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={onClose}>Cancel</Btn><Btn loading={busy} onClick={() => void save()}>Schedule</Btn></div>
     </Modal>
   );
 }
@@ -204,16 +244,44 @@ export function TasksPage() {
     return t;
   }, [d.tasks, isExec, user]);
 
-  const setStat = (id: string, status: Task["status"]) => {
-    mutate((db) => { const t = db.tasks.find((x) => x.id === id); if (t) t.status = status; });
-    logAct("task", id, user!.id, "Task updated", `Status → ${status}`);
+  const setStat = async (id: string, status: Task["status"]) => {
+    try {
+      await taskApi.update(Number(id), { status });
+      mutate((db) => { const row = db.tasks.find((x) => x.id === id); if (row) row.status = status; });
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not update task", "err"); }
   };
   const [tf, setTf] = useState<Partial<Task>>({ priority: "Medium", status: "Pending", dueDate: addDaysISO(3) });
-  const save = () => {
+  const [taskBusy, setTaskBusy] = useState(false);
+  const save = async () => {
     if (!tf.title?.trim()) { toast("Title required", "err"); return; }
-    mutate((db) => db.tasks.unshift({ id: uid(), title: tf.title!, description: tf.description || "", entityType: tf.entityType, entityId: tf.entityId, assigneeId: tf.assigneeId || user!.id, priority: (tf.priority as Priority) || "Medium", status: "Pending", dueDate: tf.dueDate || addDaysISO(3), createdBy: user!.id, createdAt: new Date().toISOString() }));
-    logAct("task", "new", user!.id, "Task created", tf.title);
-    toast("Task created"); setCreate(false); setTf({ priority: "Medium", status: "Pending", dueDate: addDaysISO(3) });
+    setTaskBusy(true);
+    try {
+      const assigneeId = tf.assigneeId || user!.id;
+      const r = await taskApi.create({
+        title: tf.title.trim(), description: tf.description || "",
+        lead_id: tf.entityType === "lead" && tf.entityId ? Number(tf.entityId) : null,
+        customer_id: tf.entityType === "customer" && tf.entityId ? Number(tf.entityId) : null,
+        assigned_to_id: Number(assigneeId), priority: (tf.priority as Priority) || "Medium",
+        due_date: tf.dueDate || addDaysISO(3),
+      });
+      mutate((db) => db.tasks.unshift({
+        id: String((r.data as any).id), title: tf.title!, description: tf.description || "",
+        entityType: tf.entityType, entityId: tf.entityId, assigneeId,
+        priority: (tf.priority as Priority) || "Medium", status: "Pending",
+        dueDate: tf.dueDate || addDaysISO(3), createdBy: user!.id, createdAt: new Date().toISOString(),
+      }));
+      toast("Task created", "ok"); setCreate(false);
+      setTf({ priority: "Medium", status: "Pending", dueDate: addDaysISO(3) });
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not create task", "err"); }
+    finally { setTaskBusy(false); }
+  };
+  const removeTask = async (id: string) => {
+    if (!window.confirm("Delete task?")) return;
+    try {
+      await taskApi.remove(Number(id));
+      mutate((db) => { db.tasks = db.tasks.filter((x) => x.id !== id); });
+      toast("Task deleted", "warn");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not delete task", "err"); }
   };
 
   const KanbanCol = ({ status }: { status: Task["status"] }) => {
@@ -221,7 +289,7 @@ export function TasksPage() {
     return (
       <div className="kan-col flex min-h-[220px] flex-1 flex-col rounded-[10px] border border-ink-200/70 bg-ink-100/45 p-2 dark:border-ink-700/60 dark:bg-ink-900/50"
         onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData("task"); if (id && can("tasks", "edit")) { setStat(id, status); toast(`Task → ${status}`, "info"); } }}>
+        onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData("task"); if (id && can("tasks", "edit")) { void setStat(id, status); toast(`Task → ${status}`, "info"); } }}>
         <div className="mb-2 px-1 text-[11.5px] font-bold uppercase tracking-wider text-ink-500">{status} <span className="num">({items.length})</span></div>
         <div className="space-y-2">
           {items.map((t) => (
@@ -267,8 +335,8 @@ export function TasksPage() {
                   <td className="td"><Badge tone={statusTone(t.status)}>{t.status}</Badge></td>
                   <td className="td">
                     <div className="flex gap-1">
-                      {t.status !== "Completed" && can("tasks", "edit") && <button className="rounded p-1 text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20" onClick={() => { setStat(t.id, "Completed"); toast("Task completed"); }}><Check size={13} /></button>}
-                      {can("tasks", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => { mutate((db) => { db.tasks = db.tasks.filter((x) => x.id !== t.id); }); toast("Task deleted", "warn"); }}><Trash2 size={13} /></button>}
+                      {t.status !== "Completed" && can("tasks", "edit") && <button className="rounded p-1 text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20" onClick={() => { void setStat(t.id, "Completed"); toast("Task completed"); }}><Check size={13} /></button>}
+                      {can("tasks", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => void removeTask(t.id)}><Trash2 size={13} /></button>}
                     </div>
                   </td>
                 </tr>
@@ -292,7 +360,7 @@ export function TasksPage() {
             <Field label="Due date"><Input type="date" value={tf.dueDate || ""} onChange={(e) => setTf((p) => ({ ...p, dueDate: e.target.value }))} /></Field>
             <Field label="Link to lead"><Select value={tf.entityId || ""} onChange={(e) => setTf((p) => ({ ...p, entityId: e.target.value || undefined, entityType: e.target.value ? "lead" : undefined }))}><option value="">—</option>{d.leads.filter((l) => !["Converted", "Lost"].includes(l.status)).slice(0, 40).map((l) => <option key={l.id} value={l.id}>{l.businessName}</option>)}</Select></Field>
           </div>
-          <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setCreate(false)}>Cancel</Btn><Btn onClick={save}>Create</Btn></div>
+          <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setCreate(false)}>Cancel</Btn><Btn loading={taskBusy} onClick={() => void save()}>Create</Btn></div>
         </Modal>
       )}
     </div>
@@ -307,19 +375,48 @@ export function MeetingsPage() {
   const [modal, setModal] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const today = todayISO();
-  const [mf, setMf] = useState<Partial<Meeting>>({ date: addDaysISO(1), start: "11:00", end: "12:00", location: "Google Meet", link: "https://meet.google.com/itct-demo" });
+  const [mf, setMf] = useState<Partial<Meeting>>({ date: addDaysISO(1), start: "11:00", end: "12:00", location: "Google Meet", link: "" });
   const upcoming = useMemo(() => [...d.meetings].filter((m) => m.date >= today).sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start)), [d.meetings, today]);
   const past = useMemo(() => [...d.meetings].filter((m) => m.date < today).sort((a, b) => b.date.localeCompare(a.date)), [d.meetings, today]);
-  const save = () => {
+  const [meetingBusy, setMeetingBusy] = useState(false);
+  const save = async () => {
     if (!mf.title?.trim() || !mf.entityId) { toast("Title and customer/lead are required", "err"); return; }
-    if (editId) { mutate((db) => { const m = db.meetings.find((x) => x.id === editId); if (m) Object.assign(m, mf); }); toast("Meeting updated"); }
-    else {
-      mutate((db) => { db.meetings.unshift({ id: uid(), title: mf.title!, entityType: mf.entityType || "customer", entityId: mf.entityId!, employeeIds: mf.employeeIds || [user!.id], date: mf.date!, start: mf.start!, end: mf.end!, location: mf.location || "", link: mf.link || "", agenda: mf.agenda || "", notes: "", outcome: "", createdAt: new Date().toISOString() }); });
-      mutate((db) => { db.notices.unshift({ id: uid(), userId: "managers", title: `Meeting: ${mf.title}`, body: `${fmtD(mf.date)} ${mf.start} · ${mf.location}`, read: false, at: new Date().toISOString(), link: "/meetings", kind: "meeting" }); });
-      logAct("meeting", "new", user!.id, "Meeting created", mf.title);
-      toast("Meeting scheduled", "ok", `${fmtD(mf.date)} · ${mf.start}`);
-    }
-    setModal(false); setEditId(null); setMf({ date: addDaysISO(1), start: "11:00", end: "12:00", location: "Google Meet" });
+    setMeetingBusy(true);
+    try {
+      const body = {
+        title: mf.title.trim(),
+        lead_id: mf.entityType === "lead" ? Number(mf.entityId) : null,
+        customer_id: (mf.entityType || "customer") === "customer" ? Number(mf.entityId) : null,
+        participants: (mf.employeeIds || [user!.id]).map(Number),
+        date: mf.date, start_time: mf.start, end_time: mf.end, location: mf.location || "",
+        meeting_link: mf.link || "", agenda: mf.agenda || "",
+      };
+      if (editId) {
+        await meetingApi.update(Number(editId), body);
+        mutate((db) => { const row = db.meetings.find((x) => x.id === editId); if (row) Object.assign(row, mf); });
+        toast("Meeting updated", "ok");
+      } else {
+        const r = await meetingApi.create(body);
+        mutate((db) => db.meetings.unshift({
+          id: String((r.data as any).id), title: mf.title!, entityType: mf.entityType || "customer",
+          entityId: mf.entityId!, employeeIds: mf.employeeIds || [user!.id], date: mf.date!, start: mf.start!,
+          end: mf.end!, location: mf.location || "", link: mf.link || "", agenda: mf.agenda || "",
+          notes: "", outcome: "", createdAt: new Date().toISOString(),
+        }));
+        toast("Meeting scheduled", "ok", `${fmtD(mf.date)} · ${mf.start}`);
+      }
+      setModal(false); setEditId(null);
+      setMf({ date: addDaysISO(1), start: "11:00", end: "12:00", location: "Google Meet", link: "" });
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not save meeting", "err"); }
+    finally { setMeetingBusy(false); }
+  };
+  const removeMeeting = async (id: string) => {
+    if (!window.confirm("Delete meeting?")) return;
+    try {
+      await meetingApi.remove(Number(id));
+      mutate((db) => { db.meetings = db.meetings.filter((x) => x.id !== id); });
+      toast("Meeting deleted", "warn");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not delete meeting", "err"); }
   };
   const MeetRow = ({ m }: { m: Meeting }) => {
     const name = m.entityType === "lead" ? d.leads.find((l) => l.id === m.entityId)?.businessName : d.customers.find((c) => c.id === m.entityId)?.company;
@@ -339,7 +436,7 @@ export function MeetingsPage() {
         <div className="flex gap-1">
           {m.link && <Btn size="xs" variant="outline" onClick={() => window.open(m.link, "_blank")}><Video size={12} /> Join</Btn>}
           {can("meetings", "edit") && <button className="rounded p-1 text-ink-400 hover:text-brand-600" onClick={() => { setMf({ ...m }); setEditId(m.id); setModal(true); }}><Pencil size={13} /></button>}
-          {can("meetings", "edit") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => { if (window.confirm("Delete meeting?")) { mutate((db) => { db.meetings = db.meetings.filter((x) => x.id !== m.id); }); toast("Meeting deleted", "warn"); } }}><Trash2 size={13} /></button>}
+          {can("meetings", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => void removeMeeting(m.id)}><Trash2 size={13} /></button>}
         </div>
       </div>
     );
@@ -380,7 +477,7 @@ export function MeetingsPage() {
             </Field>
             <Field label="Agenda" className="col-span-2"><Textarea value={mf.agenda || ""} onChange={(e) => setMf((p) => ({ ...p, agenda: e.target.value }))} /></Field>
           </div>
-          <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setModal(false)}>Cancel</Btn><Btn onClick={save}>{editId ? "Save" : "Schedule"}</Btn></div>
+          <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setModal(false)}>Cancel</Btn><Btn loading={meetingBusy} onClick={() => void save()}>{editId ? "Save" : "Schedule"}</Btn></div>
         </Modal>
       )}
     </div>
