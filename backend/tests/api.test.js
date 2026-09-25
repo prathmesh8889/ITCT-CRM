@@ -248,8 +248,9 @@ test("task and meeting update SQL use PostgreSQL placeholders", () => {
   const fs = require("node:fs");
   const path = require("node:path");
   const src = fs.readFileSync(path.join(__dirname, "../src/routes/crm.js"), "utf8");
-  assert.match(src, /UPDATE tasks SET \$\{sets\} WHERE id = \$\$\{patch\.length \+ 1\}/);
-  assert.match(src, /UPDATE meetings SET \$\{sets\} WHERE id = \$\$\{patch\.length \+ 1\}/);
+  assert.ok(src.includes('patch.map(([k], i) => k + " = $" + (i + 1))'));
+  assert.ok(src.includes('"UPDATE tasks SET " + sets + " WHERE id = $" + (patch.length + 1)'));
+  assert.ok(src.includes('"UPDATE meetings SET " + sets + " WHERE id = $" + (patch.length + 1)'));
   assert.doesNotMatch(src, /UPDATE tasks SET \$\{sets\} WHERE id = \$\{patch\.length \+ 1\}/);
   assert.doesNotMatch(src, /UPDATE meetings SET \$\{sets\} WHERE id = \$\{patch\.length \+ 1\}/);
 });
