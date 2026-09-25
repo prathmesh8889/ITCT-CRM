@@ -5,7 +5,8 @@
 const express = require("express");
 const { db } = require("../db");
 const { HttpError, money } = require("../core");
-const { requireAuth, requirePerm, MODULES, PERMS, SUPER_ROLES, hashPassword, applyOwnership, isWide } = require("../security");
+const { requireAuth, requirePerm, MODULES, PERMS, SUPER_ROLES, hashPassword, applyOwnership, isWide, rolePerms } = require("../security");
+const { scopedUserIds } = require("../workforce-scope");
 const { runTriggers, ollamaPing, aiAssist, aiSettings, AI_UNAVAILABLE } = require("../engines");
 
 const router = express.Router();
@@ -478,14 +479,36 @@ router.get("/search", requireAuth, async (req, res, next) => {
     const q = String(req.query.q || "").trim();
     if (!q) return res.json({ leads: [], customers: [], companies: [], contacts: [], deals: [], quotations: [], invoices: [] });
     const like = `%${q}%`;
+    const ids = await scopedUserIds(req);
+    const can = (module) => rolePerms(req.role.name, req.role.perms, module, "view");
+    const own = (col, baseSql, scopedSql) =>
+      ids === null ? db.all(baseSql, [like]) : db.all(scopedSql, [like, ids]);
+
     const [leads, customers, companies, contacts, deals, quotations, invoices] = await Promise.all([
-      db.all("SELECT id, business_name, city FROM leads WHERE deleted_at IS NULL AND (business_name ILIKE $1 OR email ILIKE $1 OR phone ILIKE $1 OR contact_person ILIKE $1) LIMIT 5", [like]),
-      db.all("SELECT id, name, company, city FROM customers WHERE deleted_at IS NULL AND (name ILIKE $1 OR company ILIKE $1 OR email ILIKE $1) LIMIT 5", [like]),
-      db.all("SELECT id, name, industry FROM companies WHERE name ILIKE $1 OR industry ILIKE $1 LIMIT 5", [like]),
-      db.all("SELECT id, first_name, last_name, designation, email FROM contacts WHERE first_name ILIKE $1 OR last_name ILIKE $1 OR email ILIKE $1 LIMIT 5", [like]),
-      db.all("SELECT id, name, value FROM deals WHERE name ILIKE $1 LIMIT 5", [like]),
-      db.all("SELECT id, quotation_number, status FROM quotations WHERE quotation_number ILIKE $1 LIMIT 5", [like]),
-      db.all("SELECT id, invoice_number, status FROM invoices WHERE invoice_number ILIKE $1 LIMIT 5", [like]),
+      can("leads") ? own("assigned_user_id",
+        "SELECT id,business_name,city FROM leads WHERE deleted_at IS NULL AND (business_name ILIKE $1 OR email ILIKE $1 OR phone ILIKE $1 OR contact_person ILIKE $1) LIMIT 5",
+        "SELECT id,business_name,city FROM leads WHERE deleted_at IS NULL AND assigned_user_id=ANY($2::int[]) AND (business_name ILIKE $1 OR email ILIKE $1 OR phone ILIKE $1 OR contact_person ILIKE $1) LIMIT 5") : [],
+      can("customers") ? own("account_manager_id",
+        "SELECT id,name,company,city FROM customers WHERE deleted_at IS NULL AND (name ILIKE $1 OR company ILIKE $1 OR email ILIKE $1) LIMIT 5",
+        "SELECT id,name,company,city FROM customers WHERE deleted_at IS NULL AND account_manager_id=ANY($2::int[]) AND (name ILIKE $1 OR company ILIKE $1 OR email ILIKE $1) LIMIT 5") : [],
+      can("companies") ? own("account_manager_id",
+        "SELECT id,name,industry FROM companies WHERE name ILIKE $1 OR industry ILIKE $1 LIMIT 5",
+        "SELECT id,name,industry FROM companies WHERE account_manager_id=ANY($2::int[]) AND (name ILIKE $1 OR industry ILIKE $1) LIMIT 5") : [],
+      can("contacts") ? (ids === null
+        ? db.all("SELECT id,first_name,last_name,designation,email FROM contacts WHERE first_name ILIKE $1 OR last_name ILIKE $1 OR email ILIKE $1 LIMIT 5", [like])
+        : db.all(`SELECT ct.id,ct.first_name,ct.last_name,ct.designation,ct.email
+                    FROM contacts ct LEFT JOIN companies c ON c.id=ct.company_id
+                   WHERE c.account_manager_id=ANY($2::int[])
+                     AND (ct.first_name ILIKE $1 OR ct.last_name ILIKE $1 OR ct.email ILIKE $1) LIMIT 5`, [like, ids])) : [],
+      can("deals") ? own("assigned_user_id",
+        "SELECT id,name,value FROM deals WHERE name ILIKE $1 LIMIT 5",
+        "SELECT id,name,value FROM deals WHERE assigned_user_id=ANY($2::int[]) AND name ILIKE $1 LIMIT 5") : [],
+      can("quotations") ? (ids === null
+        ? db.all("SELECT id,quotation_number,status FROM quotations WHERE quotation_number ILIKE $1 LIMIT 5", [like])
+        : db.all("SELECT id,quotation_number,status FROM quotations WHERE created_by=ANY($2::int[]) AND quotation_number ILIKE $1 LIMIT 5", [like, ids])) : [],
+      can("invoices") ? (ids === null
+        ? db.all("SELECT id,invoice_number,status FROM invoices WHERE invoice_number ILIKE $1 LIMIT 5", [like])
+        : db.all("SELECT id,invoice_number,status FROM invoices WHERE created_by=ANY($2::int[]) AND invoice_number ILIKE $1 LIMIT 5", [like, ids])) : [],
     ]);
     res.json({
       leads: leads.map((x) => ({ id: x.id, label: x.business_name, sub: x.city || "" })),
