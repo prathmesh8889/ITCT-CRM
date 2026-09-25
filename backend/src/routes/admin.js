@@ -5,7 +5,8 @@
 const express = require("express");
 const { db } = require("../db");
 const { HttpError, money } = require("../core");
-const { requireAuth, requirePerm, MODULES, PERMS, SUPER_ROLES, hashPassword, applyOwnership, isWide, rolePerms } = require("../security");
+const { requireAuth, requirePerm, MODULES, PERMS, SUPER_ROLES, SUPER_ADMIN_ROLE, hashPassword, applyOwnership, isWide,
+  rolePerms, cleanPermissionMap, effectivePermissionMap } = require("../security");
 const { scopedUserIds } = require("../workforce-scope");
 const { runTriggers, ollamaPing, aiAssist, aiSettings, AI_UNAVAILABLE } = require("../engines");
 
@@ -15,6 +16,8 @@ const audit = (user, action, target, detail = "") =>
     [user?.id ?? null, user?.name ?? "system", action, target, detail]);
 const num = (v) => (v === null || v === undefined ? v : Number(v));
 const safeUser = (u) => { const { password_hash, ...rest } = u; return rest; };
+const superAdminOnly = (req, _res, next) =>
+  req.role?.name === SUPER_ADMIN_ROLE ? next() : next(new HttpError(403, "Super Admin access required"));
 
 // ================= USERS =================
 router.get("/users", requirePerm("employees", "view"), async (_req, res, next) => {
@@ -71,6 +74,94 @@ router.delete("/users/:id", requirePerm("employees", "delete"), async (req, res,
     await db.query("UPDATE users SET deleted_at = now(), active = FALSE WHERE id = $1", [id]);
     await audit(req.user, "User Deleted", `user:${u.email}`, u.name);
     res.json({ ok: true, soft_deleted: true });
+  } catch (e) { next(e); }
+});
+
+// ================= SUPER ADMIN · EMPLOYEE ACCESS CONTROL =================
+router.get("/access-control/users", requireAuth, superAdminOnly, async (_req, res, next) => {
+  try {
+    const rows = await db.all(`
+      SELECT u.id, u.name, u.email, u.department, u.designation, u.role_id, u.team_id, u.active,
+             COALESCE(u.permission_overrides, '{}'::jsonb) AS permission_overrides,
+             r.name AS role_name, COALESCE(r.perms, '{}'::jsonb) AS role_perms,
+             t.name AS team_name
+        FROM users u
+        LEFT JOIN roles r ON r.id=u.role_id
+        LEFT JOIN teams t ON t.id=u.team_id
+       WHERE u.deleted_at IS NULL
+       ORDER BY CASE WHEN r.name='Super Admin' THEN 0 ELSE 1 END, u.name
+    `);
+    const users = rows.map((u) => ({
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      department: u.department || "",
+      designation: u.designation || "",
+      role_id: u.role_id,
+      role_name: u.role_name || "No role",
+      team_id: u.team_id,
+      team_name: u.team_name || "",
+      active: !!u.active,
+      protected: u.role_name === SUPER_ADMIN_ROLE,
+      role_perms: u.role_perms || {},
+      overrides: cleanPermissionMap(u.permission_overrides || {}),
+      effective_perms: effectivePermissionMap(u.role_name || "", u.role_perms || {}, u.permission_overrides || {}),
+    }));
+    res.json({ modules: MODULES, perms: PERMS, users });
+  } catch (e) { next(e); }
+});
+
+router.patch("/access-control/users/:id", requireAuth, superAdminOnly, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) throw new HttpError(422, "Invalid employee id");
+    const target = await db.one(`
+      SELECT u.*, r.name AS role_name, COALESCE(r.perms, '{}'::jsonb) AS role_perms
+        FROM users u LEFT JOIN roles r ON r.id=u.role_id
+       WHERE u.id=$1 AND u.deleted_at IS NULL
+    `, [id]);
+    if (!target) throw new HttpError(404, "Employee not found");
+    if (target.role_name === SUPER_ADMIN_ROLE)
+      throw new HttpError(409, "Super Admin permissions are protected and cannot be restricted");
+
+    const incoming = cleanPermissionMap(req.body?.overrides || {});
+    const cleaned = {};
+    for (const [module, list] of Object.entries(incoming)) {
+      const next = [...list];
+      if (next.length && !next.includes("view")) next.unshift("view");
+      cleaned[module] = [...new Set(next)];
+    }
+
+    await db.query("UPDATE users SET permission_overrides=$1 WHERE id=$2", [JSON.stringify(cleaned), id]);
+    await audit(req.user, "Employee Access Changed", `user:${target.email}`,
+      `${Object.keys(cleaned).length} custom module override(s)`);
+    res.json({
+      id,
+      overrides: cleaned,
+      effective_perms: effectivePermissionMap(target.role_name || "", target.role_perms || {}, cleaned),
+    });
+  } catch (e) { next(e); }
+});
+
+router.delete("/access-control/users/:id", requireAuth, superAdminOnly, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const target = await db.one(`
+      SELECT u.*, r.name AS role_name, COALESCE(r.perms, '{}'::jsonb) AS role_perms
+        FROM users u LEFT JOIN roles r ON r.id=u.role_id
+       WHERE u.id=$1 AND u.deleted_at IS NULL
+    `, [id]);
+    if (!target) throw new HttpError(404, "Employee not found");
+    if (target.role_name === SUPER_ADMIN_ROLE)
+      throw new HttpError(409, "Super Admin permissions are protected and cannot be reset");
+
+    await db.query("UPDATE users SET permission_overrides='{}'::jsonb WHERE id=$1", [id]);
+    await audit(req.user, "Employee Access Reset", `user:${target.email}`, "Role defaults restored");
+    res.json({
+      ok: true,
+      overrides: {},
+      effective_perms: effectivePermissionMap(target.role_name || "", target.role_perms || {}, {}),
+    });
   } catch (e) { next(e); }
 });
 
@@ -480,7 +571,7 @@ router.get("/search", requireAuth, async (req, res, next) => {
     if (!q) return res.json({ leads: [], customers: [], companies: [], contacts: [], deals: [], quotations: [], invoices: [] });
     const like = `%${q}%`;
     const ids = await scopedUserIds(req);
-    const can = (module) => rolePerms(req.role.name, req.role.perms, module, "view");
+    const can = (module) => rolePerms(req.role.name, req.role.perms, module, "view", req.user.permission_overrides || {});
     const own = (col, baseSql, scopedSql) =>
       ids === null ? db.all(baseSql, [like]) : db.all(scopedSql, [like, ids]);
 
