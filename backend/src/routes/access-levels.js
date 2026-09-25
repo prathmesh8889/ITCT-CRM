@@ -13,7 +13,7 @@ const {
 } = require("../access-levels");
 
 const router = express.Router();
-const safeUser = (u) => { const { password_hash, ...rest } = u; return rest; };
+const safeUser = (u) => { const { password_hash, permission_overrides, ...rest } = u; return rest; };
 const audit = (user, action, target, detail = "") =>
   db.query(
     "INSERT INTO audit_logs (user_id, user_name, action, target, detail) VALUES ($1,$2,$3,$4,$5)",
