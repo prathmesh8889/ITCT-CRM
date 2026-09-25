@@ -934,6 +934,26 @@ router.delete("/tasks/:id", requirePerm("tasks", "delete"), async (req, res, nex
   } catch (e) { next(e); }
 });
 
+async function ensureMeetingScope(req, id) {
+  const row = await db.one("SELECT * FROM meetings WHERE id=$1", [Number(id)]);
+  if (!row) throw new HttpError(404, "Meeting not found");
+  if (isGlobalAdmin(req)) return row;
+  const ids = await scopedUserIds(req);
+  const visible = new Set((ids || []).map(String));
+  const participants = Array.isArray(row.participants) ? row.participants.map(String) : [];
+  if (!participants.some((id) => visible.has(id)))
+    throw new HttpError(403, "This meeting is outside your Workforce OS scope");
+  return row;
+}
+async function assertMeetingParticipants(req, participants) {
+  if (isGlobalAdmin(req)) return;
+  const ids = await scopedUserIds(req);
+  const visible = new Set((ids || []).map(String));
+  for (const id of participants || []) {
+    if (!visible.has(String(id))) throw new HttpError(403, "A selected participant is outside your Workforce OS scope");
+  }
+}
+
 router.get("/meetings", requirePerm("meetings", "view"), async (req, res, next) => {
   try {
     const items = await db.all("SELECT * FROM meetings ORDER BY date DESC");
@@ -948,10 +968,12 @@ router.post("/meetings", requirePerm("meetings", "create"), async (req, res, nex
   try {
     const b = req.body || {};
     if (!b.title?.trim() || !b.date) throw new HttpError(422, "title and date are required");
+    const participants = Array.isArray(b.participants) && b.participants.length ? b.participants : [req.user.id];
+    await assertMeetingParticipants(req, participants);
     const r = await db.query(
       `INSERT INTO meetings (title, lead_id, customer_id, participants, date, start_time, end_time, location, meeting_link, agenda)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-      [b.title, b.lead_id ?? null, b.customer_id ?? null, JSON.stringify(b.participants || [req.user.id]),
+      [b.title, b.lead_id ?? null, b.customer_id ?? null, JSON.stringify(participants),
        b.date, b.start_time || "10:00", b.end_time || "11:00", b.location || "", b.meeting_link || "", b.agenda || ""]);
     await activity(req.user.id, "Meeting Created", "meetings", r.rows[0].id, { title: b.title, date: b.date });
     res.status(201).json({ id: r.rows[0].id });
@@ -961,8 +983,8 @@ router.post("/meetings", requirePerm("meetings", "create"), async (req, res, nex
 router.patch("/meetings/:id", requirePerm("meetings", "edit"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const current = await db.one("SELECT * FROM meetings WHERE id = $1", [id]);
-    if (!current) throw new HttpError(404, "Meeting not found");
+    const current = await ensureMeetingScope(req, id);
+    if (req.body?.participants !== undefined) await assertMeetingParticipants(req, req.body.participants);
     const allowed = ["title", "lead_id", "customer_id", "participants", "date", "start_time", "end_time",
       "location", "meeting_link", "agenda", "notes", "outcome"];
     const patch = Object.entries(req.body || {}).filter(([k, v]) => allowed.includes(k) && v !== undefined);
@@ -980,8 +1002,7 @@ router.patch("/meetings/:id", requirePerm("meetings", "edit"), async (req, res, 
 router.delete("/meetings/:id", requirePerm("meetings", "delete"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const row = await db.one("SELECT * FROM meetings WHERE id = $1", [id]);
-    if (!row) throw new HttpError(404, "Meeting not found");
+    const row = await ensureMeetingScope(req, id);
     await db.query("DELETE FROM meetings WHERE id = $1", [id]);
     await activity(req.user.id, "Meeting Deleted", "meetings", id, { title: row.title });
     res.json({ ok: true });
