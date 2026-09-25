@@ -3,6 +3,12 @@ import { KeyRound, ShieldCheck } from "lucide-react";
 import { authApi } from "../lib/api";
 import { useStore } from "../store";
 import { Btn, Field, Input } from "../components/ui";
+const passwordPolicyError = (value: string) => {
+  if (value.length < 12) return "New password must be at least 12 characters";
+  if (!/[a-z]/.test(value) || !/[A-Z]/.test(value) || !/\d/.test(value) || !/[^A-Za-z0-9]/.test(value))
+    return "Use uppercase, lowercase, a number and a symbol";
+  return "";
+};
 
 export default function ChangePassword() {
   const { user, logout, toast } = useStore();
@@ -14,7 +20,7 @@ export default function ChangePassword() {
 
   const save = async () => {
     if (!current) { toast("Enter your current password", "err"); return; }
-    if (next.length < 8) { toast("New password must be at least 8 characters", "err"); return; }
+    const policyError = passwordPolicyError(next); if (policyError) { toast(policyError, "err"); return; }
     if (next !== confirm) { toast("New passwords do not match", "err"); return; }
     if (current === next) { toast("Choose a different new password", "err"); return; }
     setBusy(true);
@@ -55,7 +61,7 @@ export default function ChangePassword() {
             <Input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void save(); }} />
           </Field>
           <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-[12px] leading-relaxed text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
-            <span className="flex items-start gap-2"><ShieldCheck size={15} className="mt-0.5 shrink-0" /> Use at least 8 characters and do not reuse the current/temporary password.</span>
+            <span className="flex items-start gap-2"><ShieldCheck size={15} className="mt-0.5 shrink-0" /> Use at least 12 characters with uppercase, lowercase, a number and a symbol. Do not reuse the current/temporary password.</span>
           </div>
           <Btn className="w-full justify-center" loading={busy} onClick={() => void save()}><KeyRound size={15} /> Change password</Btn>
         </div>
