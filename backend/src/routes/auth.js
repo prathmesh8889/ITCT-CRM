@@ -99,7 +99,7 @@ router.post("/logout", requireAuth, async (req, res, next) => {
 
 router.get("/me", requireAuth, async (req, res, next) => {
   try {
-    const { password_hash, ...user } = req.user;
+    const { password_hash, permission_overrides, ...user } = req.user;
     const perms = effectivePermissionMap(req.role.name, req.role.perms || {}, req.user.permission_overrides || {});
     res.json({ user, role: req.role.name, perms,
                is_super: req.role.name === SUPER_ADMIN_ROLE });
