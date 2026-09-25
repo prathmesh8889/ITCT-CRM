@@ -165,11 +165,13 @@ export const companyApi = {
   list: (q?: Query) => api.get<Paged<unknown>>("/companies", { params: q }),
   create: (b: unknown) => api.post("/companies", b),
   update: (id: number, b: unknown) => api.patch(`/companies/${id}`, b),
+  remove: (id: number) => api.delete(`/companies/${id}`),
 };
 export const contactApi = {
   list: (q?: Query) => api.get<Paged<unknown>>("/contacts", { params: q }),
   create: (b: unknown) => api.post("/contacts", b),
   update: (id: number, b: unknown) => api.patch(`/contacts/${id}`, b),
+  remove: (id: number) => api.delete(`/contacts/${id}`),
 };
 
 // ---------- deals ----------
@@ -197,6 +199,7 @@ export const followUpApi = {
   list: (q?: Query) => api.get<Paged<unknown>>("/followups", { params: q }),
   create: (b: unknown) => api.post("/followups", b),
   update: (id: number, b: unknown) => api.patch(`/followups/${id}`, b),
+  remove: (id: number) => api.delete(`/followups/${id}`),
 };
 export const taskApi = {
   list: (q?: Query) => api.get<Paged<unknown>>("/tasks", { params: q }),
@@ -232,13 +235,19 @@ export const invoiceApi = {
   get: (id: number) => api.get(`/invoices/${id}`),
   create: (b: unknown) => api.post("/invoices", b),
   update: (id: number, b: unknown) => api.patch(`/invoices/${id}`, b),
+  remove: (id: number) => api.delete(`/invoices/${id}`),
   recordPayment: (id: number, b: { amount: number; payment_date: string; payment_method: string; transaction_reference?: string; notes?: string }) =>
     api.post(`/invoices/${id}/payments`, b),
 };
-export const paymentApi = { list: (q?: Query) => api.get<Paged<unknown>>("/payments", { params: q }) };
+export const paymentApi = {
+  list: (q?: Query) => api.get<Paged<unknown>>("/payments", { params: q }),
+  update: (id: number, b: unknown) => api.patch(`/payments/${id}`, b),
+  remove: (id: number) => api.delete(`/payments/${id}`),
+};
 export const expenseApi = {
   list: (q?: Query) => api.get<Paged<unknown>>("/expenses", { params: q }),
   create: (b: unknown) => api.post("/expenses", b),
+  update: (id: number, b: unknown) => api.patch(`/expenses/${id}`, b),
   remove: (id: number) => api.delete(`/expenses/${id}`),
 };
 
@@ -260,6 +269,7 @@ export const teamApi = {
   list: () => api.get("/teams"),
   create: (b: unknown) => api.post("/teams", b),
   update: (id: number, b: unknown) => api.patch(`/teams/${id}`, b),
+  remove: (id: number) => api.delete(`/teams/${id}`),
 };
 export const automationApi = {
   listRules: () => api.get("/automation/rules"),
