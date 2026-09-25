@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Crown, Pencil, Plus, Search, Users } from "lucide-react";
+import { Crown, Pencil, Plus, Search, Trash2, Users } from "lucide-react";
 import { api, DEMO_MODE } from "../lib/api";
 import { useStore } from "../store";
 import { Avatar, Badge, Btn, Field, Input, Modal, Select } from "../components/ui";
@@ -184,6 +184,16 @@ export default function TeamsPage() {
     ? xs.map((x) => x.id === row.id ? row : x)
     : [...xs, row].sort((a, b) => `${a.department}-${a.name}`.localeCompare(`${b.department}-${b.name}`)));
 
+  const removeTeam = async (team: Team) => {
+    if (!window.confirm(`Delete team ${team.name}? Members will stay as employees but will be unassigned from this team.`)) return;
+    try {
+      await api.delete(`/teams/${team.id}`);
+      setTeams((xs) => xs.filter((x) => x.id !== team.id));
+      setEmployees((xs) => xs.map((u) => Number(u.team_id) === Number(team.id) ? { ...u, team_id: null } : u));
+      toast("Team deleted", "warn");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not delete team", "err"); }
+  };
+
   return <div className="mx-auto max-w-[1280px] p-3 sm:p-4 md:p-6">
     <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div><div className="mb-1 flex items-center gap-2"><Badge tone="green">Workforce OS</Badge><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-ink-400">Department Teams</span></div>
@@ -205,7 +215,7 @@ export default function TeamsPage() {
           <div className="mt-2 text-[11.5px]"><span className="text-ink-400">Focus</span><div className="mt-0.5 line-clamp-2 font-medium">{team.focus || "No focus/project added"}</div></div>
         </div>
         <div className="mt-3 flex flex-wrap gap-1.5">{(team.members || []).slice(0, 6).map((m) => <span key={m.id} className="flex items-center gap-1.5 rounded-full border border-ink-200 py-0.5 pl-0.5 pr-2 text-[10.5px] dark:border-ink-700"><Avatar name={m.name} color={m.color || "#0F766E"} size={18} />{m.name.split(" ")[0]}</span>)}{(team.member_count || 0) > 6 && <Badge tone="slate">+{(team.member_count || 0) - 6}</Badge>}</div>
-        {can("teams", "edit") && <div className="mt-4 border-t border-ink-100 pt-3 text-right dark:border-ink-800"><Btn size="xs" variant="outline" onClick={() => setEditing(team)}><Pencil size={12} /> Edit Team</Btn></div>}
+        {(can("teams", "edit") || can("teams", "delete")) && <div className="mt-4 flex justify-end gap-2 border-t border-ink-100 pt-3 dark:border-ink-800">{can("teams", "edit") && <Btn size="xs" variant="outline" onClick={() => setEditing(team)}><Pencil size={12} /> Edit Team</Btn>}{can("teams", "delete") && <Btn size="xs" variant="ghost" onClick={() => void removeTeam(team)}><Trash2 size={12} /> Delete</Btn>}</div>}
       </div>)}</div>}
 
     {adding && <TeamEditor team={null} departments={departments} employees={employees} onClose={() => setAdding(false)} onSaved={saved} />}
