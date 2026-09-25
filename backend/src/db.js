@@ -43,8 +43,10 @@ CREATE TABLE IF NOT EXISTS users (
   role_id INT REFERENCES roles(id), team_id INT REFERENCES teams(id),
   reporting_manager_id INT REFERENCES users(id), joining_date DATE,
   is_sales BOOLEAN DEFAULT FALSE, active BOOLEAN DEFAULT TRUE, color TEXT DEFAULT '#0F766E',
+  permission_overrides JSONB NOT NULL DEFAULT '{}'::jsonb,
   last_login_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT now(), deleted_at TIMESTAMPTZ
 );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS permission_overrides JSONB NOT NULL DEFAULT '{}'::jsonb;
 CREATE TABLE IF NOT EXISTS refresh_tokens (
   id SERIAL PRIMARY KEY, user_id INT REFERENCES users(id), token_hash TEXT UNIQUE NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL, revoked BOOLEAN DEFAULT FALSE, created_at TIMESTAMPTZ DEFAULT now()
