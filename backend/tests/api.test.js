@@ -11,7 +11,7 @@ test("CRM route module loads without startup reference errors", () => {
 const assert = require("node:assert");
 
 const { money, computeTotals, validateLead, normPhone, normDomain, parseCSV, toCSV } = require("../src/core");
-const { rolePerms, passwordPolicyError } = require("../src/security");
+const { rolePerms, effectivePermissionMap, passwordPolicyError } = require("../src/security");
 
 // ---------------- money math (backend authoritative) ----------------
 test("money rounds to paise", () => {
@@ -70,6 +70,29 @@ test("CSV export escapes commas and quotes", () => {
 test("super roles bypass the permission matrix", () => {
   assert.ok(rolePerms("Super Admin", null, "anything", "delete"));
   assert.ok(rolePerms("Admin", {}, "invoices", "approve"));
+});
+
+test("Super Admin employee overrides replace role permissions per module", () => {
+  const role = { leads: ["view", "create", "edit"], invoices: ["view"] };
+  const overrides = { leads: [], invoices: ["view", "create"] };
+  assert.strictEqual(rolePerms("Sales Executive", role, "leads", "view", overrides), false);
+  assert.strictEqual(rolePerms("Sales Executive", role, "invoices", "create", overrides), true);
+  assert.strictEqual(rolePerms("Sales Executive", role, "invoices", "delete", overrides), false);
+});
+
+test("Admin can be restricted by Super Admin while Super Admin stays protected", () => {
+  assert.strictEqual(rolePerms("Admin", {}, "settings", "view", { settings: [] }), false);
+  assert.strictEqual(rolePerms("Admin", {}, "dashboard", "delete", { settings: [] }), true);
+  assert.strictEqual(rolePerms("Super Admin", {}, "settings", "delete", { settings: [] }), true);
+});
+
+test("department and access-level pages inherit Employees role defaults until customized", () => {
+  const effective = effectivePermissionMap("Department Head", { employees: ["view", "edit"] }, {});
+  assert.deepStrictEqual(effective.departments, ["view", "edit"]);
+  assert.deepStrictEqual(effective.access_levels, ["view", "edit"]);
+  const customized = effectivePermissionMap("Department Head", { employees: ["view", "edit"] }, { departments: [] });
+  assert.deepStrictEqual(customized.departments, []);
+  assert.deepStrictEqual(customized.access_levels, ["view", "edit"]);
 });
 
 test("matrix roles are checked strictly", () => {
@@ -276,4 +299,9 @@ test("CRUD audit exposes safe delete endpoints for relationship and workflow rec
     assert.ok(billing.includes(`router.delete("${route}"`), `missing DELETE ${route}`);
   }
   assert.ok(teams.includes('router.delete("/teams/:id"'), "missing DELETE /teams/:id");
+});
+
+
+test("Super Admin access-control route module loads", () => {
+  assert.doesNotThrow(() => require("../src/routes/admin"));
 });
