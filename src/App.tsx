@@ -88,7 +88,7 @@ function Root() {
       <Route path="/access-levels" element={<Guard mod="access_levels"><AccessLevels/></Guard>}/>
       <Route path="/departments" element={<Guard mod="departments"><Departments/></Guard>}/>
       <Route path="/access-control" element={<SuperAdminGuard><AccessControl/></SuperAdminGuard>}/>
-      <Route path="/access-settings" element={<Navigate to="/access-control" replace />} />
+      <Route path="/access-settings" element={<Navigate to="/departments" replace />} />
       <Route path="/automation" element={<Guard mod="automation"><AutomationPage/></Guard>}/>
       <Route path="/audit" element={<Guard mod="audit"><AuditPage/></Guard>}/>
       <Route path="/settings" element={<Guard mod="settings"><Settings/></Guard>}/>
