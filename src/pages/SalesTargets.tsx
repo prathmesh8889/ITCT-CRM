@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { Pencil, Plus, Target, Trash2, Trophy, UserRoundCheck } from "lucide-react";
 import { salesTargetApi } from "../lib/api";
 import { Badge, Btn, EmptyState, Field, Input, Modal, Money, Progress, Select, Textarea } from "../components/ui";
@@ -235,7 +236,7 @@ function TargetCard({ target: t, canManage, onEdit, onRemove, compact = false }:
   );
 }
 
-function Metric({ label, achieved, target, pct }: { label: string; achieved: React.ReactNode; target: React.ReactNode; pct: number }) {
+function Metric({ label, achieved, target, pct }: { label: string; achieved: ReactNode; target: ReactNode; pct: number }) {
   return (
     <div className="rounded-md bg-ink-50 p-3 dark:bg-ink-800/60">
       <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-ink-400"><span>{label}</span><span>{pct}%</span></div>
