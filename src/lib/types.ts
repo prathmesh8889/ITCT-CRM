@@ -5,7 +5,7 @@ export type ModuleKey =
   | "dashboard" | "leads" | "discovery" | "customers" | "companies" | "contacts"
   | "deals" | "followups" | "tasks" | "meetings" | "calendar" | "quotations"
   | "invoices" | "payments" | "expenses" | "products" | "employees" | "teams" | "reports"
-  | "automation" | "ai" | "settings" | "audit";
+  | "automation" | "ai" | "settings" | "audit" | "targets";
 
 export type Perm = "view" | "create" | "edit" | "delete" | "assign" | "export" | "approve";
 

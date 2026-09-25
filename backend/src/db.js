@@ -76,8 +76,29 @@ CREATE TABLE IF NOT EXISTS lead_scores (
 );
 CREATE TABLE IF NOT EXISTS lead_assignments (
   id SERIAL PRIMARY KEY, lead_id INT REFERENCES leads(id), user_id INT REFERENCES users(id),
-  team_id INT REFERENCES teams(id), strategy TEXT DEFAULT '', created_at TIMESTAMPTZ DEFAULT now()
+  team_id INT REFERENCES teams(id), strategy TEXT DEFAULT '', assigned_by INT REFERENCES users(id),
+  created_at TIMESTAMPTZ DEFAULT now()
 );
+ALTER TABLE lead_assignments ADD COLUMN IF NOT EXISTS assigned_by INT REFERENCES users(id);
+CREATE TABLE IF NOT EXISTS sales_targets (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES users(id),
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  revenue_target NUMERIC(14,2) DEFAULT 0,
+  deals_target INT DEFAULT 0,
+  leads_target INT DEFAULT 0,
+  notes TEXT DEFAULT '',
+  assigned_by INT REFERENCES users(id),
+  active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT ck_sales_targets_dates CHECK (end_date >= start_date)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_targets_user_period
+  ON sales_targets(user_id, start_date, end_date);
+CREATE INDEX IF NOT EXISTS ix_sales_targets_user_active
+  ON sales_targets(user_id, active, end_date DESC);
 CREATE TABLE IF NOT EXISTS discovery_jobs (
   id SERIAL PRIMARY KEY, created_by INT REFERENCES users(id), category TEXT, location TEXT,
   target INT DEFAULT 20, source TEXT DEFAULT 'maps', keywords TEXT DEFAULT '',

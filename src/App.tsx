@@ -11,6 +11,7 @@ import Login from "./pages/Login";
 import ChangePassword from "./pages/ChangePassword";
 import UserProfile from "./pages/UserProfile";
 import Dashboard from "./pages/Dashboard";
+import SalesTargets from "./pages/SalesTargets";
 import DepartmentWorkspace from "./pages/DepartmentWorkspace";
 import Leads from "./pages/Leads";
 import Discovery from "./pages/Discovery";
@@ -59,6 +60,7 @@ function Root() {
     <Route element={user ? (mustChange ? <Navigate to="/change-password" replace /> : <AppLayout/>) : <Navigate to="/login" replace />}>
       <Route path="/profile/:id" element={<UserProfile/>}/>
       <Route path="/dashboard" element={<Guard mod="dashboard"><Dashboard/></Guard>}/>
+      <Route path="/targets" element={<Guard mod="targets"><SalesTargets/></Guard>}/>
       <Route path="/department-workspace" element={<><DepartmentTeamWorkPanel/><DepartmentWorkspace/></>}/>
       <Route path="/leads" element={<Guard mod="leads"><Leads/></Guard>}/>
       <Route path="/discovery" element={<Guard mod="discovery"><Discovery/></Guard>}/>

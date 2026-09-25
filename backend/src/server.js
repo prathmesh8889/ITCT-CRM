@@ -59,6 +59,7 @@ app.use("/api", require("./routes/department-overview"));
 app.use("/api", require("./routes/department-workspace"));
 app.use("/api", require("./routes/scoped-crm"));
 app.use("/api", crmRoutes);
+app.use("/api", require("./routes/sales-targets"));
 app.use("/api", require("./routes/billing"));
 app.use("/api", require("./routes/dashboard"));
 app.use("/api", require("./routes/access-levels"));

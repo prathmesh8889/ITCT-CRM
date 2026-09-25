@@ -287,6 +287,12 @@ export const dashboardApi = {
   agenda: () => api.get("/dashboard/agenda"),
   activity: () => api.get("/dashboard/activity"),
 };
+export const salesTargetApi = {
+  list: () => api.get("/sales-targets"),
+  create: (body: unknown) => api.post("/sales-targets", body),
+  update: (id: number, body: unknown) => api.patch(`/sales-targets/${id}`, body),
+  remove: (id: number) => api.delete(`/sales-targets/${id}`),
+};
 export const reportApi = {
   leads: (q?: Query) => api.get("/reports/leads", { params: q }),
   sales: (q?: Query) => api.get("/reports/sales", { params: q }),
