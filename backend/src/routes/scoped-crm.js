@@ -56,9 +56,9 @@ router.get("/leads", requirePerm("leads", "view"), async (req, res, next) => {
       if (visible !== null) {
         params.push(visible);
         if (isSalesAssignmentAuthority(req))
-          where.push(`(assigned_user_id = ANY(${params.length}::int[]) OR assigned_user_id IS NULL)`);
+          where.push("(assigned_user_id = ANY($" + params.length + "::int[]) OR assigned_user_id IS NULL)");
         else
-          where.push(`assigned_user_id = ANY(${params.length}::int[])`);
+          where.push("assigned_user_id = ANY($" + params.length + "::int[])");
       }
     }
     if (search) { params.push(`%${search}%`); where.push(`(business_name ILIKE $${params.length} OR contact_person ILIKE $${params.length} OR email ILIKE $${params.length} OR phone ILIKE $${params.length} OR city ILIKE $${params.length} OR lead_code ILIKE $${params.length})`); }
