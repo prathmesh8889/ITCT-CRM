@@ -109,6 +109,14 @@ export function FollowUps() {
       toast(`Marked ${status.toLowerCase()}`, status === "Missed" ? "warn" : "info");
     } catch (e) { toast(e instanceof Error ? e.message : "Could not update follow-up", "err"); }
   };
+  const removeFollowUp = async (id: string) => {
+    if (!window.confirm("Delete this follow-up?")) return;
+    try {
+      await followUpApi.remove(Number(id));
+      mutate((db) => { db.followups = db.followups.filter((x) => x.id !== id); });
+      toast("Follow-up deleted", "warn");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not delete follow-up", "err"); }
+  };
 
   const fu = completeId ? d.followups.find((f) => f.id === completeId) : null;
   const counts = {
@@ -141,13 +149,14 @@ export function FollowUps() {
                 </div>
                 {emp && <span className="flex items-center gap-1.5 text-[12px] text-ink-500"><Avatar name={emp.name} color={emp.color} size={22} />{emp.name.split(" ")[0]}</span>}
                 <Badge tone={statusTone(overdue && f.status === "Scheduled" ? "Missed" : f.status)}>{overdue && f.status === "Scheduled" ? "Overdue" : f.status}</Badge>
-                {can("followups", "edit") && f.status !== "Completed" && f.status !== "Cancelled" && (
-                  <div className="flex gap-1">
-                    {f.status !== "Missed" || true ? <Btn size="xs" variant="soft" onClick={() => setCompleteId(f.id)}><Check size={12} /> Done</Btn> : null}
+                <div className="flex gap-1">
+                  {can("followups", "edit") && f.status !== "Completed" && f.status !== "Cancelled" && <>
+                    <Btn size="xs" variant="soft" onClick={() => setCompleteId(f.id)}><Check size={12} /> Done</Btn>
                     <Btn size="xs" variant="ghost" onClick={() => { setReschedId(f.id); setRsDate(addDaysISO(1)); }}><Clock size={12} /></Btn>
                     <Btn size="xs" variant="ghost" onClick={() => void setStatus(f.id, "Cancelled")}><X size={12} /></Btn>
-                  </div>
-                )}
+                  </>}
+                  {can("followups", "delete") && <Btn size="xs" variant="ghost" onClick={() => void removeFollowUp(f.id)}><Trash2 size={12} /></Btn>}
+                </div>
               </div>
             );
           })}
@@ -236,6 +245,7 @@ export function TasksPage() {
   const d = useDB();
   const [view, setView] = useState<"list" | "kanban">("list");
   const [create, setCreate] = useState(false);
+  const [editTaskId, setEditTaskId] = useState<string | null>(null);
   const today = todayISO();
   const isExec = user?.roleId === "r_sales";
   const tasks = useMemo(() => {
@@ -257,23 +267,45 @@ export function TasksPage() {
     setTaskBusy(true);
     try {
       const assigneeId = tf.assigneeId || user!.id;
-      const r = await taskApi.create({
-        title: tf.title.trim(), description: tf.description || "",
-        lead_id: tf.entityType === "lead" && tf.entityId ? Number(tf.entityId) : null,
-        customer_id: tf.entityType === "customer" && tf.entityId ? Number(tf.entityId) : null,
-        assigned_to_id: Number(assigneeId), priority: (tf.priority as Priority) || "Medium",
-        due_date: tf.dueDate || addDaysISO(3),
-      });
-      mutate((db) => db.tasks.unshift({
-        id: String((r.data as any).id), title: tf.title!, description: tf.description || "",
-        entityType: tf.entityType, entityId: tf.entityId, assigneeId,
-        priority: (tf.priority as Priority) || "Medium", status: "Pending",
-        dueDate: tf.dueDate || addDaysISO(3), createdBy: user!.id, createdAt: new Date().toISOString(),
-      }));
-      toast("Task created", "ok"); setCreate(false);
+      if (editTaskId) {
+        await taskApi.update(Number(editTaskId), {
+          title: tf.title.trim(), description: tf.description || "",
+          assigned_to_id: Number(assigneeId), priority: (tf.priority as Priority) || "Medium",
+          due_date: tf.dueDate || null,
+        });
+        mutate((db) => {
+          const row = db.tasks.find((x) => x.id === editTaskId);
+          if (row) Object.assign(row, {
+            title: tf.title!.trim(), description: tf.description || "", assigneeId,
+            priority: (tf.priority as Priority) || "Medium", dueDate: tf.dueDate || "",
+          });
+        });
+        toast("Task updated", "ok");
+      } else {
+        const r = await taskApi.create({
+          title: tf.title.trim(), description: tf.description || "",
+          lead_id: tf.entityType === "lead" && tf.entityId ? Number(tf.entityId) : null,
+          customer_id: tf.entityType === "customer" && tf.entityId ? Number(tf.entityId) : null,
+          assigned_to_id: Number(assigneeId), priority: (tf.priority as Priority) || "Medium",
+          due_date: tf.dueDate || addDaysISO(3),
+        });
+        mutate((db) => db.tasks.unshift({
+          id: String((r.data as any).id), title: tf.title!, description: tf.description || "",
+          entityType: tf.entityType, entityId: tf.entityId, assigneeId,
+          priority: (tf.priority as Priority) || "Medium", status: "Pending",
+          dueDate: tf.dueDate || addDaysISO(3), createdBy: user!.id, createdAt: new Date().toISOString(),
+        }));
+        toast("Task created", "ok");
+      }
+      setCreate(false); setEditTaskId(null);
       setTf({ priority: "Medium", status: "Pending", dueDate: addDaysISO(3) });
-    } catch (e) { toast(e instanceof Error ? e.message : "Could not create task", "err"); }
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not save task", "err"); }
     finally { setTaskBusy(false); }
+  };
+  const editTask = (task: Task) => {
+    setEditTaskId(task.id);
+    setTf({ ...task });
+    setCreate(true);
   };
   const removeTask = async (id: string) => {
     if (!window.confirm("Delete task?")) return;
@@ -316,7 +348,7 @@ export function TasksPage() {
             <button onClick={() => setView("list")} className={`rounded px-2.5 py-1 ${view === "list" ? "bg-brand-600 text-white" : "text-ink-500"}`}><List size={14} /></button>
             <button onClick={() => setView("kanban")} className={`rounded px-2.5 py-1 ${view === "kanban" ? "bg-brand-600 text-white" : "text-ink-500"}`}><LayoutGrid size={14} /></button>
           </div>
-          {can("tasks", "create") && <Btn size="sm" onClick={() => setCreate(true)}><Plus size={14} /> Task</Btn>}
+          {can("tasks", "create") && <Btn size="sm" onClick={() => { setEditTaskId(null); setTf({ priority: "Medium", status: "Pending", dueDate: addDaysISO(3) }); setCreate(true); }}><Plus size={14} /> Task</Btn>}
         </div>
       </div>
       {view === "list" ? (
@@ -335,7 +367,8 @@ export function TasksPage() {
                   <td className="td"><Badge tone={statusTone(t.status)}>{t.status}</Badge></td>
                   <td className="td">
                     <div className="flex gap-1">
-                      {t.status !== "Completed" && can("tasks", "edit") && <button className="rounded p-1 text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20" onClick={() => { void setStat(t.id, "Completed"); toast("Task completed"); }}><Check size={13} /></button>}
+                      {can("tasks", "edit") && <button className="rounded p-1 text-ink-400 hover:text-brand-600" onClick={() => editTask(t)}><Pencil size={13} /></button>}
+                      {t.status !== "Completed" && can("tasks", "edit") && <button className="rounded p-1 text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20" onClick={() => { void setStat(t.id, "Completed"); }}><Check size={13} /></button>}
                       {can("tasks", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => void removeTask(t.id)}><Trash2 size={13} /></button>}
                     </div>
                   </td>
@@ -351,16 +384,16 @@ export function TasksPage() {
         </div>
       )}
       {create && (
-        <Modal open onClose={() => setCreate(false)} title="New task">
+        <Modal open onClose={() => { setCreate(false); setEditTaskId(null); }} title={editTaskId ? "Edit task" : "New task"}>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Title" req className="col-span-2"><Input value={tf.title || ""} onChange={(e) => setTf((p) => ({ ...p, title: e.target.value }))} /></Field>
             <Field label="Description" className="col-span-2"><Textarea value={tf.description || ""} onChange={(e) => setTf((p) => ({ ...p, description: e.target.value }))} /></Field>
             <Field label="Assignee"><Select value={tf.assigneeId || user?.id || ""} onChange={(e) => setTf((p) => ({ ...p, assigneeId: e.target.value }))}>{d.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></Field>
             <Field label="Priority"><Select value={tf.priority} onChange={(e) => setTf((p) => ({ ...p, priority: e.target.value as Priority }))}>{["Low", "Medium", "High", "Urgent"].map((p) => <option key={p}>{p}</option>)}</Select></Field>
             <Field label="Due date"><Input type="date" value={tf.dueDate || ""} onChange={(e) => setTf((p) => ({ ...p, dueDate: e.target.value }))} /></Field>
-            <Field label="Link to lead"><Select value={tf.entityId || ""} onChange={(e) => setTf((p) => ({ ...p, entityId: e.target.value || undefined, entityType: e.target.value ? "lead" : undefined }))}><option value="">—</option>{d.leads.filter((l) => !["Converted", "Lost"].includes(l.status)).slice(0, 40).map((l) => <option key={l.id} value={l.id}>{l.businessName}</option>)}</Select></Field>
+            <Field label="Link to lead"><Select disabled={!!editTaskId} value={tf.entityId || ""} onChange={(e) => setTf((p) => ({ ...p, entityId: e.target.value || undefined, entityType: e.target.value ? "lead" : undefined }))}><option value="">—</option>{d.leads.filter((l) => !["Converted", "Lost"].includes(l.status)).slice(0, 40).map((l) => <option key={l.id} value={l.id}>{l.businessName}</option>)}</Select></Field>
           </div>
-          <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setCreate(false)}>Cancel</Btn><Btn loading={taskBusy} onClick={() => void save()}>Create</Btn></div>
+          <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => { setCreate(false); setEditTaskId(null); }}>Cancel</Btn><Btn loading={taskBusy} onClick={() => void save()}>{editTaskId ? "Save changes" : "Create"}</Btn></div>
         </Modal>
       )}
     </div>
