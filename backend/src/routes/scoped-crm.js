@@ -116,7 +116,7 @@ router.get("/contacts", requirePerm("contacts", "view"), async (req, res, next) 
     const { page, pageSize } = paged(req);
     const { search = "" } = req.query;
     const ids = await idsFor(req); const params = []; const where = [];
-    if (ids !== null) { params.push(ids); where.push(`c.account_manager_id = ANY($${params.length}::int[])`); }
+    if (ids !== null) { params.push(ids); where.push(`(c.account_manager_id = ANY(${params.length}::int[]) OR ct.created_by = ANY(${params.length}::int[]))`); }
     if (search) { params.push(`%${search}%`); where.push(`(ct.first_name ILIKE $${params.length} OR ct.last_name ILIKE $${params.length} OR ct.email ILIKE $${params.length} OR ct.phone ILIKE $${params.length})`); }
     const w = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const total = (await db.one(`SELECT COUNT(*)::int AS n FROM contacts ct LEFT JOIN companies c ON c.id = ct.company_id ${w}`, params)).n;
