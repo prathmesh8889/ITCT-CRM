@@ -8,7 +8,7 @@ const express = require("express");
 const { db } = require("../db");
 const { HttpError } = require("../core");
 const { requireAuth, requirePerm } = require("../security");
-const { scopedUserIds, isGlobalAdmin } = require("../workforce-scope");
+const { scopedUserIds, isGlobalAdmin, norm, isSalesAssignmentAuthority } = require("../workforce-scope");
 
 const router = express.Router();
 const num = (v) => (v === null || v === undefined ? v : Number(v));
@@ -49,7 +49,18 @@ router.get("/leads", requirePerm("leads", "view"), async (req, res, next) => {
     const { search = "", status: statusF = "", source = "", priority = "", city = "", owner = "",
       category = "", sort_by = "created_at", sort_order = "desc" } = req.query;
     const where = ["deleted_at IS NULL"]; const params = [];
-    const visible = await addOwnerScope(req, where, params, "assigned_user_id");
+    let visible = null;
+    const executiveSalesAuthority = isGlobalAdmin(req) || norm(req.role?.name) === "ceo" || norm(req.role?.name).includes("director");
+    if (!executiveSalesAuthority) {
+      visible = await idsFor(req);
+      if (visible !== null) {
+        params.push(visible);
+        if (isSalesAssignmentAuthority(req))
+          where.push(`(assigned_user_id = ANY(${params.length}::int[]) OR assigned_user_id IS NULL)`);
+        else
+          where.push(`assigned_user_id = ANY(${params.length}::int[])`);
+      }
+    }
     if (search) { params.push(`%${search}%`); where.push(`(business_name ILIKE $${params.length} OR contact_person ILIKE $${params.length} OR email ILIKE $${params.length} OR phone ILIKE $${params.length} OR city ILIKE $${params.length} OR lead_code ILIKE $${params.length})`); }
     if (statusF) { params.push(statusF); where.push(`status = $${params.length}`); }
     if (source) { params.push(source); where.push(`source = $${params.length}`); }
@@ -212,18 +223,24 @@ async function assertAssignee(req, userId) {
   const ids = await idsFor(req);
   if (ids !== null && !ids.includes(id)) throw new HttpError(403, "Selected employee is outside your Workforce OS scope");
 }
-const assignmentGuard = (field) => [requireAuth, async (req, _res, next) => {
-  try { if (req.body && req.body[field] !== undefined) await assertAssignee(req, req.body[field]); next(); }
-  catch (e) { next(e); }
+const assignmentGuard = (field, managerOnly = false) => [requireAuth, async (req, _res, next) => {
+  try {
+    if (req.body && req.body[field] !== undefined) {
+      if (managerOnly && !isSalesAssignmentAuthority(req))
+        throw new HttpError(403, "Only Sales Manager, CEO or Director can change sales ownership");
+      await assertAssignee(req, req.body[field]);
+    }
+    next();
+  } catch (e) { next(e); }
 }];
-router.post("/leads", ...assignmentGuard("assigned_user_id"), (_req, _res, next) => next());
-router.patch("/leads/:id", ...assignmentGuard("assigned_user_id"), (_req, _res, next) => next());
+router.post("/leads", ...assignmentGuard("assigned_user_id", true), (_req, _res, next) => next());
+router.patch("/leads/:id", ...assignmentGuard("assigned_user_id", true), (_req, _res, next) => next());
 router.post("/customers", ...assignmentGuard("account_manager_id"), (_req, _res, next) => next());
 router.patch("/customers/:id", ...assignmentGuard("account_manager_id"), (_req, _res, next) => next());
 router.post("/companies", ...assignmentGuard("account_manager_id"), (_req, _res, next) => next());
 router.patch("/companies/:id", ...assignmentGuard("account_manager_id"), (_req, _res, next) => next());
 router.post("/deals", ...assignmentGuard("assigned_user_id"), (_req, _res, next) => next());
-router.patch("/deals/:id", ...assignmentGuard("assigned_user_id"), (_req, _res, next) => next());
+router.patch("/deals/:id", ...assignmentGuard("assigned_user_id", true), (_req, _res, next) => next());
 router.post("/tasks", ...assignmentGuard("assigned_to_id"), (_req, _res, next) => next());
 router.patch("/tasks/:id", ...assignmentGuard("assigned_to_id"), (_req, _res, next) => next());
 router.post("/followups", ...assignmentGuard("employee_id"), (_req, _res, next) => next());
