@@ -498,7 +498,7 @@ router.get("/search", requireAuth, async (req, res, next) => {
         ? db.all("SELECT id,first_name,last_name,designation,email FROM contacts WHERE first_name ILIKE $1 OR last_name ILIKE $1 OR email ILIKE $1 LIMIT 5", [like])
         : db.all(`SELECT ct.id,ct.first_name,ct.last_name,ct.designation,ct.email
                     FROM contacts ct LEFT JOIN companies c ON c.id=ct.company_id
-                   WHERE c.account_manager_id=ANY($2::int[])
+                   WHERE (c.account_manager_id=ANY($2::int[]) OR ct.created_by=ANY($2::int[]))
                      AND (ct.first_name ILIKE $1 OR ct.last_name ILIKE $1 OR ct.email ILIKE $1) LIMIT 5`, [like, ids])) : [],
       can("deals") ? own("assigned_user_id",
         "SELECT id,name,value FROM deals WHERE name ILIKE $1 LIMIT 5",
