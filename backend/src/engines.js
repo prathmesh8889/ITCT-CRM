@@ -34,12 +34,13 @@ async function runTriggers(trigger, { lead = null, extra = {} } = {}) {
     for (const action of rule.actions || []) {
       if (action.type === "set_priority" && lead) await db.query("UPDATE leads SET priority = $1 WHERE id = $2", [action.value, lead.id]);
       else if (action.type === "set_status" && lead) await db.query("UPDATE leads SET status = $1 WHERE id = $2", [action.value, lead.id]);
-      else if (action.type === "assign_user" && lead && action.value !== "managers")
-        await db.query("UPDATE leads SET assigned_user_id = $1 WHERE id = $2", [Number(action.value), lead.id]);
-      else if (action.type === "assign_team" && lead) {
-        const member = await db.one("SELECT id FROM users WHERE team_id = $1 AND is_sales AND active AND deleted_at IS NULL ORDER BY id", [Number(action.value)]);
-        await db.query("UPDATE leads SET assigned_team_id = $1, assigned_user_id = COALESCE($2, assigned_user_id) WHERE id = $3",
-          [Number(action.value), member?.id ?? null, lead.id]);
+      else if ((action.type === "assign_user" || action.type === "assign_team") && lead) {
+        // Sales ownership is intentionally human-assigned only. Automation may
+        // flag the lead for managers, but cannot expose a lead to a salesperson.
+        await db.query(
+          "INSERT INTO notifications (user_id,title,body,link,kind) VALUES (NULL,$1,$2,'/leads','lead')",
+          ["Lead awaiting manager assignment", `${lead.business_name || lead.lead_code || "Lead"} matched automation "${rule.name}". Sales Manager/CEO/Director must allot it manually.`],
+        );
       } else if (action.type === "followup" && lead && lead.assigned_user_id) {
         const hours = Number(action.hours || action.value || 24);
         const when = new Date(Date.now() + hours * 3600_000);
