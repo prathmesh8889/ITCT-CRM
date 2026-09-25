@@ -21,7 +21,7 @@ const audit = (user, action, target, detail = "") =>
   );
 const normalizedDepartment = (value) => String(value || "").trim().toLowerCase();
 
-router.get("/access-levels", requirePerm("employees", "view"), async (req, res, next) => {
+router.get("/access-levels", requirePerm("access_levels", "view"), async (req, res, next) => {
   try {
     await ensureAccessLevelSchema();
     let counts;
@@ -49,7 +49,7 @@ router.get("/access-levels", requirePerm("employees", "view"), async (req, res, 
   } catch (e) { next(e); }
 });
 
-router.patch("/users/:id/access-level", requirePerm("employees", "edit"), async (req, res, next) => {
+router.patch("/users/:id/access-level", requirePerm("access_levels", "edit"), async (req, res, next) => {
   try {
     await ensureAccessLevelSchema();
     const id = Number(req.params.id);
