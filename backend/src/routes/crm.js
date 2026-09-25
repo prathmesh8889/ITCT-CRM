@@ -9,6 +9,7 @@ const { db } = require("../db");
 const { HttpError, money, nextCode, normPhone, normDomain, normName, validateLead, parseCSV, toCSV } = require("../core");
 const { requireAuth, requirePerm, applyOwnership, ensureLead, ensureCustomer, ensureDeal, ensureFollowup, ensureTask } = require("../security");
 const { runTriggers, aiQualifyLead } = require("../engines");
+const { norm, isGlobalAdmin, isSalesAssignmentAuthority } = require("../workforce-scope");
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -49,7 +50,11 @@ async function autoAssign(lead, strategyOverride) {
   const row = await db.one("SELECT value FROM crm_settings WHERE key = 'assignment'");
   const cfg = row?.value || {};
   const strat = strategyOverride || cfg.strategy || "manual";
-  const sales = await db.all("SELECT * FROM users WHERE is_sales AND active AND deleted_at IS NULL ORDER BY id");
+  const sales = await db.all(`SELECT * FROM users
+    WHERE active AND deleted_at IS NULL
+      AND (is_sales = TRUE OR lower(trim(COALESCE(department,''))) = 'sales & business development')
+      AND COALESCE(access_level,6) >= 4
+    ORDER BY id`);
   if (strat === "manual" || !sales.length) return strat;
   const setAssignee = async (uid) => { await db.query("UPDATE leads SET assigned_user_id = $1 WHERE id = $2", [uid, lead.id]); lead.assigned_user_id = uid; };
   if (strat === "priority" && Number(lead.estimated_value || 0) >= Number(cfg.high_value_threshold || 100000) && cfg.high_value_user_id)
@@ -157,11 +162,11 @@ router.post("/leads", requirePerm("leads", "create"), async (req, res, next) => 
        lead.assigned_user_id ?? null, lead.assigned_team_id ?? null, lead.next_followup_at ?? null,
        lead.notes || "", lead.created_by]);
     const created = await db.one("SELECT * FROM leads WHERE lead_code = $1", [code]);
-    let strat = "manual";
-    if (!created.assigned_user_id) strat = await autoAssign(created);
+    // New leads stay unassigned unless an authorized manager/executive explicitly
+    // selected a salesperson. Sales reps never receive company-wide auto assignment.
     if (created.assigned_user_id) {
-      await db.query("INSERT INTO lead_assignments (lead_id, user_id, team_id, strategy) VALUES ($1,$2,$3,$4)",
-        [created.id, created.assigned_user_id, created.assigned_team_id, strat]);
+      await db.query("INSERT INTO lead_assignments (lead_id, user_id, team_id, strategy, assigned_by) VALUES ($1,$2,$3,'manual',$4)",
+        [created.id, created.assigned_user_id, created.assigned_team_id, req.user.id]);
       await runTriggers("lead.assigned", { lead: created });
     }
     await db.query("INSERT INTO lead_scores (lead_id, score, temperature, intent, action, reason, scored_by) VALUES ($1,0,'Cold','Low','','Awaiting qualification','none')", [created.id]);
@@ -233,8 +238,8 @@ router.post("/leads/import", requirePerm("leads", "create"), upload.single("file
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'New',$13,$14) RETURNING *`,
           [code, business, data.contact_person, data.email, data.phone, data.whatsapp, data.website,
            data.industry, data.category, data.city, data.state, data.source, lead.validation, req.user.id]);
-        const created = await db.one("SELECT * FROM leads WHERE lead_code = $1", [code]);
-        await autoAssign(created);
+        // Imported leads enter the manager's unassigned pool. A Sales Manager,
+        // CEO or Director must explicitly allot them before a salesperson sees them.
         imported++;
       } catch (err) { failed++; failedRows.push({ row, error: String(err.message).slice(0, 200) }); }
     }
@@ -277,25 +282,50 @@ router.delete("/leads/:id", requirePerm("leads", "delete"), async (req, res, nex
   } catch (e) { next(e); }
 });
 
-router.post("/leads/:id/assign", requirePerm("leads", "assign"), async (req, res, next) => {
+router.post("/leads/:id/assign", requireAuth, async (req, res, next) => {
   try {
-    const lead = await ensureLead(req, Number(req.params.id));
-    const { user_id, team_id, strategy } = req.body || {};
-    let strat = "manual";
-    if (strategy) strat = await autoAssign(lead, strategy);
-    else {
-      await db.query("UPDATE leads SET assigned_user_id = $1, assigned_team_id = $2 WHERE id = $3",
-        [user_id ?? null, team_id ?? null, lead.id]);
-      lead.assigned_user_id = user_id ?? null; lead.assigned_team_id = team_id ?? null;
+    if (!isSalesAssignmentAuthority(req))
+      throw new HttpError(403, "Only Sales Manager, CEO or Director can allot leads to salespeople");
+    const lead = await db.one("SELECT * FROM leads WHERE id=$1 AND deleted_at IS NULL", [Number(req.params.id)]);
+    if (!lead) throw new HttpError(404, "Lead not found");
+
+    // Sales Manager may manage unassigned leads or leads already inside the sales department.
+    if (!isGlobalAdmin(req) && norm(req.role?.name) !== "ceo" && !norm(req.role?.name).includes("director") && Number(req.accessLevel) > 2) {
+      if (lead.assigned_user_id) {
+        const currentOwner = await db.one("SELECT department FROM users WHERE id=$1 AND deleted_at IS NULL", [lead.assigned_user_id]);
+        if (norm(currentOwner?.department) !== "sales & business development")
+          throw new HttpError(403, "This lead is outside the Sales department");
+      }
     }
+
+    const { user_id, strategy } = req.body || {};
+    let strat = "manual";
+    if (strategy) {
+      strat = await autoAssign(lead, strategy);
+    } else if (user_id == null || user_id === "") {
+      await db.query("UPDATE leads SET assigned_user_id=NULL, assigned_team_id=NULL, updated_at=now() WHERE id=$1", [lead.id]);
+    } else {
+      const assignee = await db.one("SELECT * FROM users WHERE id=$1 AND active=TRUE AND deleted_at IS NULL", [Number(user_id)]);
+      if (!assignee || (norm(assignee.department) !== "sales & business development" && !assignee.is_sales))
+        throw new HttpError(422, "Lead can be allotted only to an active sales employee");
+      if (!isGlobalAdmin(req) && norm(req.role?.name) !== "ceo" && !norm(req.role?.name).includes("director") && Number(req.accessLevel) > 2) {
+        if (Number(assignee.access_level || 6) <= Number(req.accessLevel || 3))
+          throw new HttpError(403, "Sales Manager can allot leads only to subordinate sales staff");
+      }
+      await db.query("UPDATE leads SET assigned_user_id=$1, assigned_team_id=$2, updated_at=now() WHERE id=$3",
+        [assignee.id, assignee.team_id ?? null, lead.id]);
+    }
+
     const fresh = await db.one("SELECT * FROM leads WHERE id = $1", [lead.id]);
-    await db.query("INSERT INTO lead_assignments (lead_id, user_id, team_id, strategy) VALUES ($1,$2,$3,$4)",
-      [lead.id, fresh.assigned_user_id, fresh.assigned_team_id, strat]);
+    await db.query("INSERT INTO lead_assignments (lead_id, user_id, team_id, strategy, assigned_by) VALUES ($1,$2,$3,$4,$5)",
+      [lead.id, fresh.assigned_user_id, fresh.assigned_team_id, strat, req.user.id]);
     const assignee = fresh.assigned_user_id ? await db.one("SELECT name FROM users WHERE id = $1", [fresh.assigned_user_id]) : null;
-    await activity(req.user.id, "Lead Assigned", "leads", lead.id, { to: assignee?.name || "team" });
-    await db.query("INSERT INTO notifications (user_id, title, body, link, kind) VALUES ($1,$2,$3,'/leads','lead')",
-      [fresh.assigned_user_id, "New lead assigned", `${lead.business_name} was assigned to you.`, ]);
-    await runTriggers("lead.assigned", { lead: fresh });
+    await activity(req.user.id, "Lead Assigned", "leads", lead.id, { to: assignee?.name || "Unassigned" });
+    if (fresh.assigned_user_id) {
+      await db.query("INSERT INTO notifications (user_id, title, body, link, kind) VALUES ($1,$2,$3,'/leads','lead')",
+        [fresh.assigned_user_id, "New lead assigned", `${lead.business_name} was assigned to you by ${req.user.name}.`]);
+      await runTriggers("lead.assigned", { lead: fresh });
+    }
     res.json(leadRow(fresh));
   } catch (e) { next(e); }
 });
