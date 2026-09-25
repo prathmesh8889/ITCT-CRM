@@ -82,7 +82,7 @@ function CustomerModal({ initial, onDone, editing }: { initial: Partial<Customer
 }
 
 function CustomerDrawer({ id, onClose, onEdit }: { id: string; onClose: () => void; onEdit: () => void }) {
-  const { user, toast } = useStore();
+  const { user, can, toast } = useStore();
   const d = useDB();
   const [tab, setTab] = useState("overview");
   const [note, setNote] = useState("");
@@ -99,7 +99,7 @@ function CustomerDrawer({ id, onClose, onEdit }: { id: string; onClose: () => vo
   const mgr = d.users.find((u) => u.id === c.managerId);
   return (
     <Drawer open onClose={onClose} title={<span className="flex items-center gap-2"><Building2 size={16} className="text-brand-600" /> {c.company}<Badge tone={statusTone(c.status)}>{c.status}</Badge></span>}
-      headerExtra={<Btn variant="ghost" size="sm" onClick={onEdit}><Pencil size={13} /> Edit</Btn>}>
+      headerExtra={can("customers", "edit") ? <Btn variant="ghost" size="sm" onClick={onEdit}><Pencil size={13} /> Edit</Btn> : undefined}>
       <div className="p-5">
         <div className="mb-4 grid grid-cols-3 gap-3">
           <div className="card p-3 text-center"><div className="text-[10px] font-bold uppercase tracking-wider text-ink-400">Lifetime value</div><Money v={payments.reduce((a, b) => a + b.amount, 0)} className="text-lg font-bold text-emerald-600" /></div>
