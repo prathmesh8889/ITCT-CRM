@@ -69,7 +69,7 @@ function Root() {
       <Route path="/followups" element={<Guard mod="followups"><FollowUps/></Guard>}/>
       <Route path="/tasks" element={<Guard mod="tasks"><TasksPage/></Guard>}/>
       <Route path="/meetings" element={<Guard mod="meetings"><MeetingsPage/></Guard>}/>
-      <Route path="/calendar" element={<CalendarPage/>}/>
+      <Route path="/calendar" element={<Guard mod="calendar"><CalendarPage/></Guard>}/>
       <Route path="/quotations" element={<Guard mod="quotations"><Quotations/></Guard>}/>
       <Route path="/invoices" element={<Guard mod="invoices"><Invoices/></Guard>}/>
       <Route path="/products" element={<Guard mod="products"><Products/></Guard>}/>
