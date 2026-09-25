@@ -11,6 +11,7 @@ const { db } = require("../db");
 const { config, HttpError, money, computeTotals, nextCode } = require("../core");
 const { requirePerm, ensureCustomer, ensureQuotation, ensureInvoice } = require("../security");
 const { runTriggers } = require("../engines");
+const { scopedUserIds } = require("../workforce-scope");
 
 const router = express.Router();
 const ALLOWED_EXT = [".pdf", ".docx", ".xlsx", ".png", ".jpg", ".jpeg"];
@@ -32,7 +33,6 @@ const activity = (userId, action, module, recordId = null, meta = null) =>
 const audit = (user, action, target, detail = "") =>
   db.query("INSERT INTO audit_logs (user_id, user_name, action, target, detail) VALUES ($1,$2,$3,$4,$5)",
     [user.id, user.name, action, target, detail]);
-const hasWideFinance = (req) => ["Super Admin", "Admin", "Sales Manager", "Accountant"].includes(req.role.name);
 
 
 const cleanItems = (items) => (items || []).map((i) => ({
@@ -130,10 +130,10 @@ router.delete("/products/:id", requirePerm("products", "delete"), async (req, re
 // ================= QUOTATIONS =================
 router.get("/quotations", requirePerm("quotations", "view"), async (req, res, next) => {
   try {
-    const wide = ["Super Admin", "Admin", "Sales Manager"].includes(req.role.name);
-    const rows = wide
+    const ids = await scopedUserIds(req);
+    const rows = ids === null
       ? await db.all("SELECT * FROM quotations ORDER BY created_at DESC")
-      : await db.all("SELECT * FROM quotations WHERE created_by = $1 ORDER BY created_at DESC", [req.user.id]);
+      : await db.all("SELECT * FROM quotations WHERE created_by = ANY($1::int[]) ORDER BY created_at DESC", [ids]);
     const items = rows.map(quoteOut);
     res.json({ items, total: items.length, page: 1, page_size: items.length });
   } catch (e) { next(e); }
@@ -227,10 +227,10 @@ router.post("/quotations/:id/convert-to-invoice", requirePerm("invoices", "creat
 // ================= INVOICES & PAYMENTS =================
 router.get("/invoices", requirePerm("invoices", "view"), async (req, res, next) => {
   try {
-    const wide = ["Super Admin", "Admin", "Sales Manager", "Accountant"].includes(req.role.name);
-    const rows = wide
+    const ids = await scopedUserIds(req);
+    const rows = ids === null
       ? await db.all("SELECT * FROM invoices ORDER BY created_at DESC")
-      : await db.all("SELECT * FROM invoices WHERE created_by = $1 ORDER BY created_at DESC", [req.user.id]);
+      : await db.all("SELECT * FROM invoices WHERE created_by = ANY($1::int[]) ORDER BY created_at DESC", [ids]);
     const items = rows.map(invOut);
     res.json({ items, total: items.length, page: 1, page_size: items.length });
   } catch (e) { next(e); }
@@ -330,12 +330,13 @@ router.post("/invoices/:id/payments", requirePerm("payments", "create"), async (
 
 router.get("/payments", requirePerm("payments", "view"), async (req, res, next) => {
   try {
-    const rows = hasWideFinance(req)
+    const ids = await scopedUserIds(req);
+    const rows = ids === null
       ? await db.all("SELECT * FROM payments ORDER BY payment_date DESC")
       : await db.all(`SELECT p.* FROM payments p
                          JOIN invoices i ON i.id=p.invoice_id
-                        WHERE i.created_by=$1 OR p.recorded_by=$1
-                        ORDER BY p.payment_date DESC`, [req.user.id]);
+                        WHERE i.created_by=ANY($1::int[]) OR p.recorded_by=ANY($1::int[])
+                        ORDER BY p.payment_date DESC`, [ids]);
     const items = rows.map((p) => ({ ...p, amount: num(p.amount), payment_date: dstr(p.payment_date) }));
     res.json({ items, total: items.length, page: 1, page_size: items.length });
   } catch (e) { next(e); }
@@ -386,9 +387,10 @@ router.delete("/payments/:id", requirePerm("payments", "delete"), async (req, re
 // ================= EXPENSES =================
 router.get("/expenses", requirePerm("expenses", "view"), async (req, res, next) => {
   try {
-    const rows = hasWideFinance(req)
+    const ids = await scopedUserIds(req);
+    const rows = ids === null
       ? await db.all("SELECT * FROM expenses ORDER BY date DESC")
-      : await db.all("SELECT * FROM expenses WHERE employee_id=$1 ORDER BY date DESC", [req.user.id]);
+      : await db.all("SELECT * FROM expenses WHERE employee_id=ANY($1::int[]) ORDER BY date DESC", [ids]);
     const items = rows.map((e) => ({ ...e, amount: num(e.amount), date: dstr(e.date) }));
     res.json({ items, total: items.length, page: 1, page_size: items.length });
   } catch (e) { next(e); }
@@ -413,8 +415,9 @@ router.patch("/expenses/:id", requirePerm("expenses", "edit"), async (req, res, 
     const id = Number(req.params.id);
     const row = await db.one("SELECT * FROM expenses WHERE id=$1", [id]);
     if (!row) throw new HttpError(404, "Expense not found");
-    if (!hasWideFinance(req) && Number(row.employee_id) !== Number(req.user.id))
-      throw new HttpError(403, "You can edit only your own expenses");
+    const ids = await scopedUserIds(req);
+    if (ids !== null && !ids.includes(Number(row.employee_id)))
+      throw new HttpError(403, "This expense is outside your Workforce OS scope");
     const b = req.body || {};
     if (b.amount !== undefined && Number(b.amount) <= 0) throw new HttpError(422, "Expense amount must be positive");
     const allowed = ["category","description","amount","date","payment_method","notes"];
@@ -435,8 +438,9 @@ router.delete("/expenses/:id", requirePerm("expenses", "delete"), async (req, re
     const id = Number(req.params.id);
     const row = await db.one("SELECT * FROM expenses WHERE id = $1", [id]);
     if (!row) throw new HttpError(404, "Expense not found");
-    if (!hasWideFinance(req) && Number(row.employee_id) !== Number(req.user.id))
-      throw new HttpError(403, "You can delete only your own expenses");
+    const ids = await scopedUserIds(req);
+    if (ids !== null && !ids.includes(Number(row.employee_id)))
+      throw new HttpError(403, "This expense is outside your Workforce OS scope");
     await db.query("DELETE FROM expenses WHERE id = $1", [id]);
     await audit(req.user, "Expense Deleted", `expense:${id}`, row.description || "");
     res.json({ ok: true });
