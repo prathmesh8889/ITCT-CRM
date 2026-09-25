@@ -255,6 +255,14 @@ test("task and meeting update SQL use PostgreSQL placeholders", () => {
   assert.doesNotMatch(src, /UPDATE meetings SET \$\{sets\} WHERE id = \$\{patch\.length \+ 1\}/);
 });
 
+test("sales lead scope query uses PostgreSQL array placeholders", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const src = fs.readFileSync(path.join(__dirname, "../src/routes/scoped-crm.js"), "utf8");
+  assert.ok(src.includes('"assigned_user_id = ANY($" + params.length + "::int[])"'));
+  assert.ok(src.includes('"(assigned_user_id = ANY($" + params.length + "::int[]) OR assigned_user_id IS NULL)"'));
+});
+
 test("CRUD audit exposes safe delete endpoints for relationship and workflow records", () => {
   const fs = require("node:fs");
   const path = require("node:path");
