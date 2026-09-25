@@ -76,8 +76,10 @@ CREATE TABLE IF NOT EXISTS lead_scores (
 );
 CREATE TABLE IF NOT EXISTS lead_assignments (
   id SERIAL PRIMARY KEY, lead_id INT REFERENCES leads(id), user_id INT REFERENCES users(id),
-  team_id INT REFERENCES teams(id), strategy TEXT DEFAULT '', created_at TIMESTAMPTZ DEFAULT now()
+  team_id INT REFERENCES teams(id), strategy TEXT DEFAULT '', assigned_by INT REFERENCES users(id),
+  created_at TIMESTAMPTZ DEFAULT now()
 );
+ALTER TABLE lead_assignments ADD COLUMN IF NOT EXISTS assigned_by INT REFERENCES users(id);
 CREATE TABLE IF NOT EXISTS sales_targets (
   id SERIAL PRIMARY KEY,
   user_id INT NOT NULL REFERENCES users(id),
