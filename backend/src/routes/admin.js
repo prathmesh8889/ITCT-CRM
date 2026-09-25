@@ -104,6 +104,7 @@ router.get("/access-control/users", requireAuth, superAdminOnly, async (_req, re
       active: !!u.active,
       protected: u.role_name === SUPER_ADMIN_ROLE,
       role_perms: u.role_perms || {},
+      role_default_perms: effectivePermissionMap(u.role_name || "", u.role_perms || {}, {}),
       overrides: cleanPermissionMap(u.permission_overrides || {}),
       effective_perms: effectivePermissionMap(u.role_name || "", u.role_perms || {}, u.permission_overrides || {}),
     }));
