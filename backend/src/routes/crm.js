@@ -9,7 +9,7 @@ const { db } = require("../db");
 const { HttpError, money, nextCode, normPhone, normDomain, normName, validateLead, parseCSV, toCSV } = require("../core");
 const { requireAuth, requirePerm, applyOwnership, ensureLead, ensureCustomer, ensureDeal, ensureFollowup, ensureTask } = require("../security");
 const { runTriggers, aiQualifyLead } = require("../engines");
-const { norm, isGlobalAdmin, isSalesAssignmentAuthority } = require("../workforce-scope");
+const { norm, isGlobalAdmin, isSalesAssignmentAuthority, scopedUserIds } = require("../workforce-scope");
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -512,6 +512,33 @@ router.post("/customers/:id/notes", requirePerm("customers", "edit"), async (req
 });
 
 // ================= COMPANIES & CONTACTS =================
+async function visibleUserIds(req) {
+  const ids = await scopedUserIds(req);
+  return ids === null ? null : ids.map(Number).filter(Number.isInteger);
+}
+async function ensureCompanyScope(req, id) {
+  const row = await db.one("SELECT * FROM companies WHERE id=$1", [Number(id)]);
+  if (!row) throw new HttpError(404, "Company not found");
+  if (isGlobalAdmin(req)) return row;
+  const ids = await visibleUserIds(req);
+  if (!ids?.includes(Number(row.account_manager_id)))
+    throw new HttpError(403, "This company is outside your Workforce OS scope");
+  return row;
+}
+async function ensureContactScope(req, id) {
+  const row = await db.one(`
+    SELECT ct.*, c.account_manager_id AS company_manager_id
+      FROM contacts ct
+      LEFT JOIN companies c ON c.id=ct.company_id
+     WHERE ct.id=$1
+  `, [Number(id)]);
+  if (!row) throw new HttpError(404, "Contact not found");
+  if (isGlobalAdmin(req)) return row;
+  const ids = await visibleUserIds(req);
+  const owned = ids?.includes(Number(row.created_by)) || ids?.includes(Number(row.company_manager_id));
+  if (!owned) throw new HttpError(403, "This contact is outside your Workforce OS scope");
+  return row;
+}
 router.get("/companies", requirePerm("companies", "view"), async (req, res, next) => {
   try {
     const page = Math.max(1, Number(req.query.page) || 1);
@@ -534,7 +561,7 @@ router.post("/companies", requirePerm("companies", "create"), async (req, res, n
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
       [b.name, b.industry || "", b.website || "", b.phone || "", b.email || "", b.gst || "", b.pan || "",
        b.address || "", b.city || "", b.state || "", b.employee_count ?? null, b.annual_revenue ?? null,
-       b.account_manager_id ?? null, b.notes || ""]);
+       b.account_manager_id ?? req.user.id, b.notes || ""]);
     res.status(201).json(r.rows[0]);
   } catch (e) { next(e); }
 });
@@ -542,8 +569,7 @@ router.post("/companies", requirePerm("companies", "create"), async (req, res, n
 router.patch("/companies/:id", requirePerm("companies", "edit"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const row = await db.one("SELECT * FROM companies WHERE id = $1", [id]);
-    if (!row) throw new HttpError(404, "Company not found");
+    const row = await ensureCompanyScope(req, id);
     const allowed = ["name", "industry", "website", "phone", "email", "gst", "pan", "address", "city", "state",
                      "employee_count", "annual_revenue", "account_manager_id", "notes"];
     const patch = Object.entries(req.body || {}).filter(([k, v]) => allowed.includes(k) && v !== undefined);
@@ -558,8 +584,7 @@ router.patch("/companies/:id", requirePerm("companies", "edit"), async (req, res
 router.delete("/companies/:id", requirePerm("companies", "delete"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const row = await db.one("SELECT * FROM companies WHERE id = $1", [id]);
-    if (!row) throw new HttpError(404, "Company not found");
+    const row = await ensureCompanyScope(req, id);
     await db.tx(async (c) => {
       await c.query("UPDATE contacts SET company_id = NULL WHERE company_id = $1", [id]);
       await c.query("UPDATE deals SET company_id = NULL WHERE company_id = $1", [id]);
@@ -588,11 +613,12 @@ router.post("/contacts", requirePerm("contacts", "create"), async (req, res, nex
   try {
     const b = req.body || {};
     if (!b.first_name?.trim()) throw new HttpError(422, "first_name is required");
+    if (b.company_id != null) await ensureCompanyScope(req, Number(b.company_id));
     const r = await db.query(
-      `INSERT INTO contacts (first_name, last_name, company_id, designation, email, phone, whatsapp, address, city, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      `INSERT INTO contacts (first_name, last_name, company_id, designation, email, phone, whatsapp, address, city, notes, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
       [b.first_name, b.last_name || "", b.company_id ?? null, b.designation || "", b.email || "",
-       b.phone || "", b.whatsapp || "", b.address || "", b.city || "", b.notes || ""]);
+       b.phone || "", b.whatsapp || "", b.address || "", b.city || "", b.notes || "", req.user.id]);
     res.status(201).json(r.rows[0]);
   } catch (e) { next(e); }
 });
@@ -600,8 +626,8 @@ router.post("/contacts", requirePerm("contacts", "create"), async (req, res, nex
 router.patch("/contacts/:id", requirePerm("contacts", "edit"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const row = await db.one("SELECT * FROM contacts WHERE id = $1", [id]);
-    if (!row) throw new HttpError(404, "Contact not found");
+    const row = await ensureContactScope(req, id);
+    if (req.body?.company_id != null) await ensureCompanyScope(req, Number(req.body.company_id));
     const allowed = ["first_name", "last_name", "company_id", "designation", "email", "phone", "whatsapp", "address", "city", "notes"];
     const patch = Object.entries(req.body || {}).filter(([k, v]) => allowed.includes(k) && v !== undefined);
     if (patch.length) {
@@ -615,8 +641,7 @@ router.patch("/contacts/:id", requirePerm("contacts", "edit"), async (req, res, 
 router.delete("/contacts/:id", requirePerm("contacts", "delete"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const row = await db.one("SELECT * FROM contacts WHERE id = $1", [id]);
-    if (!row) throw new HttpError(404, "Contact not found");
+    const row = await ensureContactScope(req, id);
     await db.query("DELETE FROM contacts WHERE id = $1", [id]);
     await activity(req.user.id, "Contact Deleted", "contacts", id, { name: `${row.first_name} ${row.last_name || ""}`.trim() });
     res.json({ ok: true });
