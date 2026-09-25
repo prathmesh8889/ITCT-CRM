@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Plus, Search, Pencil, Phone, MessageCircle, Mail, Building2, Users, UserCircle2 } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, Phone, MessageCircle, Mail, Building2, Users, UserCircle2 } from "lucide-react";
 import { useStore } from "../store";
 import { mutate, useDB } from "../lib/db";
 import { waLink, telLink, docTotals, paidFor, fmtD, inr } from "../lib/services";
@@ -184,6 +184,38 @@ export default function Relations() {
   const companies = useMemo(() => d.companies.filter((c) => !q || [c.name, c.city].some((v) => String(v || "").toLowerCase().includes(q.toLowerCase()))), [d.companies, q]);
   const contacts = useMemo(() => d.contacts.filter((c) => !q || [c.name, c.email, c.phone].some((v) => String(v || "").toLowerCase().includes(q.toLowerCase()))), [d.contacts, q]);
 
+  const removeCustomer = async (c: Customer) => {
+    if (!window.confirm(`Delete customer ${c.company || c.name}?`)) return;
+    try {
+      await customerApi.remove(Number(c.id));
+      mutate((db) => {
+        db.customers = db.customers.filter((x) => x.id !== c.id);
+        db.notes = db.notes.filter((n) => !(n.entityType === "customer" && n.entityId === c.id));
+      });
+      if (drawerId === c.id) { setDrawerId(null); setParams({ tab: "customers" }); }
+      toast("Customer deleted", "warn");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not delete customer", "err"); }
+  };
+  const removeCompany = async (c: Company) => {
+    if (!window.confirm(`Delete company ${c.name}? Linked contacts will be kept but unlinked.`)) return;
+    try {
+      await companyApi.remove(Number(c.id));
+      mutate((db) => {
+        db.companies = db.companies.filter((x) => x.id !== c.id);
+        db.contacts = db.contacts.map((x) => x.companyId === c.id ? { ...x, companyId: undefined } : x);
+      });
+      toast("Company deleted", "warn");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not delete company", "err"); }
+  };
+  const removeContact = async (c: Contact) => {
+    if (!window.confirm(`Delete contact ${c.name}?`)) return;
+    try {
+      await contactApi.remove(Number(c.id));
+      mutate((db) => { db.contacts = db.contacts.filter((x) => x.id !== c.id); });
+      toast("Contact deleted", "warn");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not delete contact", "err"); }
+  };
+
   const saveCo = async () => {
     if (!coForm.name?.trim()) { toast("Company name required", "err"); return; }
     setRelBusy(true);
@@ -257,7 +289,7 @@ export default function Relations() {
                   <td className="td">{mgr ? <span className="flex items-center gap-1.5"><Avatar name={mgr.name} color={mgr.color} size={20} />{mgr.name.split(" ")[0]}</span> : "—"}</td>
                   <td className="td">{out ? <Money v={out} className="font-semibold text-red-500" /> : <span className="text-ink-300">—</span>}</td>
                   <td className="td"><Badge tone={statusTone(c.status)}>{c.status}</Badge></td>
-                  <td className="td" onClick={(e) => e.stopPropagation()}>{can("customers", "edit") && <button className="rounded p-1 text-ink-400 hover:text-brand-600" onClick={() => setCustModal({ open: true, editing: true, id: c.id })}><Pencil size={13} /></button>}</td>
+                  <td className="td" onClick={(e) => e.stopPropagation()}><div className="flex gap-1">{can("customers", "edit") && <button className="rounded p-1 text-ink-400 hover:text-brand-600" onClick={() => setCustModal({ open: true, editing: true, id: c.id })}><Pencil size={13} /></button>}{can("customers", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => void removeCustomer(c)}><Trash2 size={13} /></button>}</div></td>
                 </tr>
               );
             })}</tbody>
@@ -272,7 +304,7 @@ export default function Relations() {
             <div key={c.id} className="card p-4 transition-all hover:-translate-y-0.5 hover:shadow-md">
               <div className="flex items-start justify-between">
                 <div><div className="hd text-[14px]">{c.name}</div><div className="text-[11.5px] text-ink-400">{c.industry} · {c.city}</div></div>
-                {can("companies", "edit") && <button className="rounded p-1 text-ink-400 hover:text-brand-600" onClick={() => { setCoEdit(c); setCoForm(c); setCoModal(true); }}><Pencil size={13} /></button>}
+                <div className="flex gap-1">{can("companies", "edit") && <button className="rounded p-1 text-ink-400 hover:text-brand-600" onClick={() => { setCoEdit(c); setCoForm(c); setCoModal(true); }}><Pencil size={13} /></button>}{can("companies", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => void removeCompany(c)}><Trash2 size={13} /></button>}</div>
               </div>
               <div className="num mt-2 space-y-0.5 text-[11.5px] text-ink-500">
                 {c.phone && <div>{c.phone}</div>}{c.email && <div>{c.email}</div>}{c.website && <div className="text-brand-600">{c.website}</div>}
@@ -293,7 +325,7 @@ export default function Relations() {
                 <td className="td font-semibold">{c.name}</td><td className="td text-ink-500">{c.title}</td>
                 <td className="td">{d.companies.find((x) => x.id === c.companyId)?.name || "—"}</td>
                 <td className="td num text-[12px]">{c.phone}</td><td className="td text-[12px]">{c.email}</td><td className="td text-ink-500">{c.city}</td>
-                <td className="td">{can("contacts", "edit") && <button className="rounded p-1 text-ink-400 hover:text-brand-600" onClick={() => { setCtEdit(c); setCtForm(c); setCtModal(true); }}><Pencil size={13} /></button>}</td>
+                <td className="td"><div className="flex gap-1">{can("contacts", "edit") && <button className="rounded p-1 text-ink-400 hover:text-brand-600" onClick={() => { setCtEdit(c); setCtForm(c); setCtModal(true); }}><Pencil size={13} /></button>}{can("contacts", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => void removeContact(c)}><Trash2 size={13} /></button>}</div></td>
               </tr>
             ))}</tbody>
           </table></div>
