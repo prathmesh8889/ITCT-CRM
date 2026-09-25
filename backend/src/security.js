@@ -45,7 +45,7 @@ const signRefresh = (user) =>
 const newRefreshHash = () => sha256(crypto.randomBytes(32).toString("hex"));
 
 // ---------------- RBAC catalog ----------------
-const MODULES = ["dashboard", "targets", "leads", "discovery", "customers", "companies", "contacts", "deals",
+const MODULES = ["dashboard", "targets", "leads", "ads", "discovery", "customers", "companies", "contacts", "deals",
   "followups", "tasks", "meetings", "calendar", "calls", "products", "quotations", "invoices", "payments",
   "expenses", "employees", "teams", "departments", "access_levels", "reports", "notifications",
   "automation", "audit", "settings"];
