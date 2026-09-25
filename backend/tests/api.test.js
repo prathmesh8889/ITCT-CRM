@@ -305,3 +305,75 @@ test("CRUD audit exposes safe delete endpoints for relationship and workflow rec
 test("Super Admin access-control route module loads", () => {
   assert.doesNotThrow(() => require("../src/routes/admin"));
 });
+
+
+test("ads lead route loads and normalizes campaign data without secrets", () => {
+  const { normalizeGeneric, safeEqual } = require("../src/routes/ads-leads");
+  const row = normalizeGeneric("tiktok", {
+    external_id: "tt-123",
+    full_name: "Asha Patil",
+    email: "ASHA@example.com",
+    phone_number: "+91 98765 43210",
+    business_name: "Asha Cafe",
+    campaign_name: "Nagpur Cafe Website",
+    ad_name: "Reel 03",
+    service_interest: "Business Website",
+    utm_source: "tiktok",
+    extra: { password: "never-store", email: "duplicate@example.com", preferred_budget: "25000" },
+  });
+  assert.strictEqual(row.provider, "tiktok");
+  assert.strictEqual(row.external_id, "tt-123");
+  assert.strictEqual(row.email, "asha@example.com");
+  assert.strictEqual(row.business_name, "Asha Cafe");
+  assert.strictEqual(row.service_interest, "Business Website");
+  assert.strictEqual(row.extra_fields.password, undefined);
+  assert.strictEqual(row.extra_fields.email, undefined);
+  assert.strictEqual(row.extra_fields.preferred_budget, "25000");
+  assert.ok(safeEqual("same-secret", "same-secret"));
+  assert.ok(!safeEqual("same-secret", "other-secret"));
+});
+
+test("ads integration keeps secrets in environment configuration only", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const env = fs.readFileSync(path.join(__dirname, "..", ".env.example"), "utf8");
+  const page = fs.readFileSync(path.join(__dirname, "..", "..", "src", "pages", "AdsLeads.tsx"), "utf8");
+  for (const key of ["ADS_WEBHOOK_SECRET", "META_WEBHOOK_VERIFY_TOKEN", "META_APP_SECRET", "META_PAGE_ACCESS_TOKEN"]) {
+    assert.match(env, new RegExp(key + "="));
+    assert.doesNotMatch(page, new RegExp(key + "\\s*="));
+  }
+});
+
+test("ads webhook signature can use the preserved raw JSON body", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const server = fs.readFileSync(path.join(__dirname, "../src/server.js"), "utf8");
+  const route = fs.readFileSync(path.join(__dirname, "../src/routes/ads-leads.js"), "utf8");
+  assert.match(server, /req\.rawBody = Buffer\.from\(buf\)/);
+  assert.match(route, /x-hub-signature-256/);
+  assert.match(route, /timingSafeEqual/);
+  assert.match(route, /x-itct-webhook-secret/);
+});
+
+test("ads leads are manager-visible by default, not salesperson-wide", () => {
+  const { workforcePermissions } = require("../src/workforce-permissions");
+  const salesManager = workforcePermissions({ department_key: "sales-business-development", level: 3 });
+  const salesRep = workforcePermissions({ department_key: "sales-business-development", level: 5 });
+  const marketingManager = workforcePermissions({ department_key: "marketing-growth", level: 3 });
+  assert.ok(salesManager.ads.includes("view"));
+  assert.ok(salesManager.ads.includes("edit"));
+  assert.strictEqual(salesRep.ads, undefined);
+  assert.ok(marketingManager.ads.includes("view"));
+});
+
+test("ads lead page and backend routes are mounted in production navigation", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const root = path.join(__dirname, "..", "..");
+  const app = fs.readFileSync(path.join(root, "src/App.tsx"), "utf8");
+  const layout = fs.readFileSync(path.join(root, "src/components/layout.tsx"), "utf8");
+  const server = fs.readFileSync(path.join(__dirname, "../src/server.js"), "utf8");
+  assert.match(app, /path="\/ads-leads"/);
+  assert.match(layout, /to: "\/ads-leads", label: "Ads Leads"/);
+  assert.match(server, /routes\/ads-leads/);
+});
