@@ -67,6 +67,18 @@ function ensureWorkforceRoleSchema() {
            WHERE lower(trim(name)) IN ('super admin','admin')
         `);
 
+        // Existing executive roles named CEO/Director are allowed to allot sales
+        // targets/leads even when they predate the canonical Workforce role catalog.
+        await client.query(`
+          UPDATE roles
+             SET perms = jsonb_set(
+               jsonb_set(COALESCE(perms, '{}'::jsonb), '{targets}', '["view","create","edit","delete","assign"]'::jsonb, true),
+               '{leads}', '["view","create","edit","assign"]'::jsonb, true
+             )
+           WHERE lower(trim(name)) = 'ceo'
+              OR lower(trim(name)) LIKE '%director%'
+        `);
+
         // Old/custom roles stay attached to historical users but cannot be newly
         // assigned. This prevents data loss while keeping the PDF catalog canonical.
         await client.query(`
