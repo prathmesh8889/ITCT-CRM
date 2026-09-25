@@ -212,3 +212,27 @@ test("service catalogue keeps setup and AMC as separate product fields", () => {
   assert.strictEqual(businessBasic.setupPriceLabel, "₹14,999");
   assert.strictEqual(businessBasic.monthlyAmcLabel, "₹699 / month");
 });
+
+
+test("sales target route loads without startup reference errors", () => {
+  assert.doesNotThrow(() => require("../src/routes/sales-targets"));
+});
+
+test("sales reps cannot create or assign company leads and can view only targets", () => {
+  const { workforcePermissions } = require("../src/workforce-permissions");
+  const rep = workforcePermissions({ department_key: "sales-business-development", level: 5 });
+  assert.deepStrictEqual(rep.targets, ["view"]);
+  assert.ok(rep.leads.includes("view"));
+  assert.ok(rep.leads.includes("edit"));
+  assert.ok(!rep.leads.includes("create"));
+  assert.ok(!rep.leads.includes("assign"));
+  assert.deepStrictEqual(rep.discovery, ["view"]);
+});
+
+test("Sales Manager can assign leads and targets", () => {
+  const { workforcePermissions } = require("../src/workforce-permissions");
+  const manager = workforcePermissions({ department_key: "sales-business-development", level: 3 });
+  assert.ok(manager.targets.includes("assign"));
+  assert.ok(manager.targets.includes("create"));
+  assert.ok(manager.leads.includes("assign"));
+});
