@@ -226,7 +226,7 @@ test("sales reps cannot create or assign company leads and can view only targets
   assert.ok(rep.leads.includes("edit"));
   assert.ok(!rep.leads.includes("create"));
   assert.ok(!rep.leads.includes("assign"));
-  assert.deepStrictEqual(rep.discovery, ["view"]);
+  assert.ok(rep.discovery.includes("create"), "discovery may create unassigned leads; manager still controls allotment");
 });
 
 test("Sales Manager can assign leads and targets", () => {
