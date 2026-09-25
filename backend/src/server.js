@@ -31,7 +31,10 @@ app.use((_req, res, next) => {
   next();
 });
 app.use(cors({ origin: config.corsOrigins, credentials: true }));
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({
+  limit: "2mb",
+  verify: (req, _res, buf) => { req.rawBody = Buffer.from(buf); },
+}));
 
 app.get("/api/health", async (_req, res) => {
   try {
@@ -59,6 +62,7 @@ app.use("/api", require("./routes/department-overview"));
 app.use("/api", require("./routes/department-workspace"));
 app.use("/api", require("./routes/scoped-crm"));
 app.use("/api", crmRoutes);
+app.use("/api", require("./routes/ads-leads").router);
 app.use("/api", require("./routes/sales-targets"));
 app.use("/api", require("./routes/billing"));
 app.use("/api", require("./routes/dashboard"));

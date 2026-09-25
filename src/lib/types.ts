@@ -2,7 +2,7 @@
 export type ID = string;
 
 export type ModuleKey =
-  | "dashboard" | "leads" | "discovery" | "customers" | "companies" | "contacts"
+  | "dashboard" | "leads" | "ads" | "discovery" | "customers" | "companies" | "contacts"
   | "deals" | "followups" | "tasks" | "meetings" | "calendar" | "quotations"
   | "invoices" | "payments" | "expenses" | "products" | "employees" | "teams" | "departments"
   | "access_levels" | "reports" | "automation" | "ai" | "settings" | "audit" | "targets";

@@ -235,6 +235,32 @@ CREATE TABLE IF NOT EXISTS activities (
   id SERIAL PRIMARY KEY, actor_id INT REFERENCES users(id), action TEXT, module TEXT,
   record_id INT, meta JSONB, created_at TIMESTAMPTZ DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS ad_lead_events (
+  id BIGSERIAL PRIMARY KEY,
+  provider TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  platform TEXT DEFAULT '',
+  campaign_id TEXT DEFAULT '', campaign_name TEXT DEFAULT '',
+  ad_id TEXT DEFAULT '', ad_name TEXT DEFAULT '',
+  form_id TEXT DEFAULT '', form_name TEXT DEFAULT '',
+  full_name TEXT DEFAULT '', first_name TEXT DEFAULT '', last_name TEXT DEFAULT '',
+  email TEXT DEFAULT '', phone TEXT DEFAULT '', whatsapp TEXT DEFAULT '',
+  business_name TEXT DEFAULT '', city TEXT DEFAULT '', state TEXT DEFAULT '',
+  service_interest TEXT DEFAULT '', source_url TEXT DEFAULT '',
+  utm_source TEXT DEFAULT '', utm_medium TEXT DEFAULT '', utm_campaign TEXT DEFAULT '',
+  utm_content TEXT DEFAULT '', utm_term TEXT DEFAULT '',
+  consent BOOLEAN,
+  status TEXT DEFAULT 'Received',
+  lead_id INT REFERENCES leads(id),
+  error TEXT DEFAULT '',
+  extra_fields JSONB DEFAULT '{}'::jsonb,
+  received_at TIMESTAMPTZ DEFAULT now(),
+  processed_at TIMESTAMPTZ,
+  UNIQUE(provider, external_id)
+);
+CREATE INDEX IF NOT EXISTS ix_ad_lead_events_received ON ad_lead_events(received_at DESC);
+CREATE INDEX IF NOT EXISTS ix_ad_lead_events_provider ON ad_lead_events(provider, received_at DESC);
+CREATE INDEX IF NOT EXISTS ix_ad_lead_events_lead ON ad_lead_events(lead_id);
 CREATE TABLE IF NOT EXISTS notifications (
   id SERIAL PRIMARY KEY, user_id INT REFERENCES users(id), title TEXT, body TEXT DEFAULT '',
   link TEXT DEFAULT '/dashboard', kind TEXT DEFAULT 'system', read BOOLEAN DEFAULT FALSE,

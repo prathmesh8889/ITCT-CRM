@@ -32,6 +32,7 @@ const LABELS: Record<string, string> = {
   dashboard: "Dashboard",
   targets: "Sales Targets",
   leads: "Leads",
+  ads: "Ads Leads",
   discovery: "Lead Discovery",
   customers: "Customers",
   companies: "Companies",
@@ -60,7 +61,7 @@ const LABELS: Record<string, string> = {
 
 const GROUP: Record<string, string> = {
   dashboard: "Overview", reports: "Overview",
-  targets: "Sales", leads: "Sales", discovery: "Sales", customers: "Sales", companies: "Sales", contacts: "Sales", deals: "Sales",
+  targets: "Sales", leads: "Sales", ads: "Sales", discovery: "Sales", customers: "Sales", companies: "Sales", contacts: "Sales", deals: "Sales",
   followups: "Workflow", tasks: "Workflow", meetings: "Workflow", calendar: "Workflow", calls: "Workflow",
   products: "Finance", quotations: "Finance", invoices: "Finance", payments: "Finance", expenses: "Finance",
   employees: "Administration", teams: "Administration", departments: "Administration", access_levels: "Administration",

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard, BarChart3, Target, Radar, LayoutGrid, Users, PhoneCall, ListChecks,
+  LayoutDashboard, BarChart3, Target, Megaphone, Radar, LayoutGrid, Users, PhoneCall, ListChecks,
   CalendarDays, Calendar, FileText, Receipt, Package, Briefcase, Zap, History, Settings,
   Bell, Search, Sun, Moon, Menu as MenuIcon, X, LogOut, CheckCheck, ChevronLeft, Database,
   Building2, ShieldAlert, ShieldCheck, UserRound,
@@ -23,6 +23,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
   { section: "Sales", items: [
     { to: "/targets", label: "Sales Targets", icon: Target, mod: "targets" },
     { to: "/leads", label: "Leads", icon: Target, mod: "leads" },
+    { to: "/ads-leads", label: "Ads Leads", icon: Megaphone, mod: "ads" },
     { to: "/discovery", label: "Lead Discovery", icon: Radar, mod: "discovery" },
     { to: "/pipeline", label: "Pipeline", icon: LayoutGrid, mod: "deals" },
     { to: "/customers", label: "Customers", icon: Users, mod: "customers" },

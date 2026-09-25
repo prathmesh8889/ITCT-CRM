@@ -24,6 +24,11 @@ const config = {
   ollamaModel: process.env.OLLAMA_MODEL || "qwen3",
   uploadDir: process.env.UPLOAD_DIR || "uploads",
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB || 10),
+  adsWebhookSecret: process.env.ADS_WEBHOOK_SECRET || process.env.ITCYBER_WEBSITE_WEBHOOK_SECRET || "",
+  metaWebhookVerifyToken: process.env.META_WEBHOOK_VERIFY_TOKEN || "",
+  metaAppSecret: process.env.META_APP_SECRET || "",
+  metaPageAccessToken: process.env.META_PAGE_ACCESS_TOKEN || "",
+  metaGraphVersion: process.env.META_GRAPH_VERSION || "",
   version: "2.0.0",
 };
 
