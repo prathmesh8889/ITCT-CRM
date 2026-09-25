@@ -13,7 +13,7 @@ const {
 } = require("../access-levels");
 
 const router = express.Router();
-const safeUser = (u) => { const { password_hash, ...rest } = u; return rest; };
+const safeUser = (u) => { const { password_hash, permission_overrides, ...rest } = u; return rest; };
 const audit = (user, action, target, detail = "") =>
   db.query(
     "INSERT INTO audit_logs (user_id, user_name, action, target, detail) VALUES ($1,$2,$3,$4,$5)",
@@ -21,7 +21,7 @@ const audit = (user, action, target, detail = "") =>
   );
 const normalizedDepartment = (value) => String(value || "").trim().toLowerCase();
 
-router.get("/access-levels", requirePerm("employees", "view"), async (req, res, next) => {
+router.get("/access-levels", requirePerm("access_levels", "view"), async (req, res, next) => {
   try {
     await ensureAccessLevelSchema();
     let counts;
@@ -49,7 +49,24 @@ router.get("/access-levels", requirePerm("employees", "view"), async (req, res, 
   } catch (e) { next(e); }
 });
 
-router.patch("/users/:id/access-level", requirePerm("employees", "edit"), async (req, res, next) => {
+router.get("/access-level-users", requirePerm("access_levels", "view"), async (req, res, next) => {
+  try {
+    await ensureAccessLevelSchema();
+    const ids = isGlobalAdmin(req) ? null : await scopedUserIds(req);
+    const rows = ids === null
+      ? await db.all(`
+          SELECT u.*, r.name AS role_name
+            FROM users u LEFT JOIN roles r ON r.id=u.role_id
+           WHERE u.deleted_at IS NULL ORDER BY u.name`)
+      : (ids?.length ? await db.all(`
+          SELECT u.*, r.name AS role_name
+            FROM users u LEFT JOIN roles r ON r.id=u.role_id
+           WHERE u.deleted_at IS NULL AND u.id=ANY($1::int[]) ORDER BY u.name`, [ids]) : []);
+    res.json(rows.map(safeUser));
+  } catch (e) { next(e); }
+});
+
+router.patch("/users/:id/access-level", requirePerm("access_levels", "edit"), async (req, res, next) => {
   try {
     await ensureAccessLevelSchema();
     const id = Number(req.params.id);

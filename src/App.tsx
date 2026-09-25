@@ -27,18 +27,26 @@ import EmployeeManagement from "./pages/EmployeeManagement";
 import TeamsPage from "./pages/Teams";
 import Departments from "./pages/DepartmentsV3";
 import AccessLevels from "./pages/AccessLevels";
+import AccessControl from "./pages/AccessControl";
 import { AutomationPage, AuditPage } from "./pages/Admin";
 import Settings from "./pages/Settings";
 import type { ModuleKey } from "./lib/types";
 
 function NoAccess() {
-  return <div className="flex h-full items-center justify-center p-6"><div className="card a-scale-in max-w-sm p-8 text-center"><ShieldAlert size={30} className="mx-auto text-amber-500"/><h2 className="hd mt-3 text-[17px]">No permission</h2><p className="mt-1 text-[13px] text-ink-500">This module is not available to your current Workforce OS role. Access is controlled by the approved organizational policy.</p></div></div>;
+  return <div className="flex h-full items-center justify-center p-6"><div className="card a-scale-in max-w-sm p-8 text-center"><ShieldAlert size={30} className="mx-auto text-amber-500"/><h2 className="hd mt-3 text-[17px]">No permission</h2><p className="mt-1 text-[13px] text-ink-500">This page is not available to your account. Access is controlled by your role and the Super Admin employee-access settings.</p></div></div>;
 }
 
 function Guard({ mod, children }: { mod: ModuleKey; children: ReactElement }) {
   const { user, can } = useStore();
   if (!user) return <Navigate to="/login" replace />;
   if (!can(mod)) return <NoAccess />;
+  return children;
+}
+
+function SuperAdminGuard({ children }: { children: ReactElement }) {
+  const { user, roleName } = useStore();
+  if (!user) return <Navigate to="/login" replace />;
+  if (roleName !== "Super Admin") return <NoAccess />;
   return children;
 }
 
@@ -77,8 +85,9 @@ function Root() {
       <Route path="/assistant" element={<Navigate to="/dashboard" replace />} />
       <Route path="/employees" element={<Guard mod="employees"><EmployeeManagement/></Guard>}/>
       <Route path="/teams" element={<Guard mod="teams"><TeamsPage/></Guard>}/>
-      <Route path="/access-levels" element={<Guard mod="employees"><AccessLevels/></Guard>}/>
-      <Route path="/departments" element={<Guard mod="employees"><Departments/></Guard>}/>
+      <Route path="/access-levels" element={<Guard mod="access_levels"><AccessLevels/></Guard>}/>
+      <Route path="/departments" element={<Guard mod="departments"><Departments/></Guard>}/>
+      <Route path="/access-control" element={<SuperAdminGuard><AccessControl/></SuperAdminGuard>}/>
       <Route path="/access-settings" element={<Navigate to="/departments" replace />} />
       <Route path="/automation" element={<Guard mod="automation"><AutomationPage/></Guard>}/>
       <Route path="/audit" element={<Guard mod="audit"><AuditPage/></Guard>}/>

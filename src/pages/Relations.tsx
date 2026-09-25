@@ -164,7 +164,13 @@ export default function Relations() {
   const { user, can, toast } = useStore();
   const d = useDB();
   const [params, setParams] = useSearchParams();
-  const tab = params.get("tab") || "customers";
+  const relationTabs = [
+    ...(can("customers", "view") ? [{ key: "customers", label: "Customers", count: d.customers.length }] : []),
+    ...(can("companies", "view") ? [{ key: "companies", label: "Companies", count: d.companies.length }] : []),
+    ...(can("contacts", "view") ? [{ key: "contacts", label: "Contacts", count: d.contacts.length }] : []),
+  ];
+  const requestedTab = params.get("tab") || "customers";
+  const tab = relationTabs.some((x) => x.key === requestedTab) ? requestedTab : (relationTabs[0]?.key || "customers");
   const [q, setQ] = useState("");
   const [custModal, setCustModal] = useState<{ open: boolean; editing: boolean; id?: string }>({ open: false, editing: false });
   const [drawerId, setDrawerId] = useState<string | null>(params.get("open"));
@@ -271,7 +277,7 @@ export default function Relations() {
           {tab === "customers" && can("customers", "create") && <Btn size="sm" onClick={() => setCustModal({ open: true, editing: false })}><Plus size={14} /> Customer</Btn>}
         </div>
       </div>
-      <Tabs className="mb-4" tabs={[{ key: "customers", label: "Customers", count: d.customers.length }, { key: "companies", label: "Companies", count: d.companies.length }, { key: "contacts", label: "Contacts", count: d.contacts.length }]} active={tab} onChange={(k) => setParams({ tab: k })} />
+      <Tabs className="mb-4" tabs={relationTabs} active={tab} onChange={(k) => setParams({ tab: k })} />
       <div className="relative mb-4 max-w-sm"><Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-400" /><Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" className="pl-8" /></div>
 
       {tab === "customers" && (

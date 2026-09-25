@@ -34,7 +34,7 @@ async function getDepartment(req, id) {
   return department;
 }
 
-router.get("/departments/:id/employees", requirePerm("employees", "view"), async (req, res, next) => {
+router.get("/departments/:id/employees", requirePerm("departments", "view"), async (req, res, next) => {
   try {
     const department = await getDepartment(req, Number(req.params.id));
     let rows = await db.all(
@@ -51,7 +51,7 @@ router.get("/departments/:id/employees", requirePerm("employees", "view"), async
   } catch (e) { next(e); }
 });
 
-router.get("/departments/:id/candidates", requirePerm("employees", "view"), async (req, res, next) => {
+router.get("/departments/:id/candidates", requirePerm("departments", "view"), async (req, res, next) => {
   try {
     const department = await getDepartment(req, Number(req.params.id));
     // Moving people across departments is a global-admin operation. HOD/TL users
@@ -80,7 +80,7 @@ router.get("/departments/:id/candidates", requirePerm("employees", "view"), asyn
   } catch (e) { next(e); }
 });
 
-router.post("/departments/:id/employees", requirePerm("employees", "edit"), async (req, res, next) => {
+router.post("/departments/:id/employees", requirePerm("departments", "edit"), async (req, res, next) => {
   try {
     const department = await getDepartment(req, Number(req.params.id));
     if (!department.active) throw new HttpError(422, "Enable this department before adding employees");
@@ -126,7 +126,7 @@ router.post("/departments/:id/employees", requirePerm("employees", "edit"), asyn
   } catch (e) { next(e); }
 });
 
-router.delete("/departments/:id/employees/:userId", requirePerm("employees", "edit"), async (req, res, next) => {
+router.delete("/departments/:id/employees/:userId", requirePerm("departments", "edit"), async (req, res, next) => {
   try {
     const department = await getDepartment(req, Number(req.params.id));
     const userId = Number(req.params.userId);

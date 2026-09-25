@@ -7,7 +7,7 @@ const { ensureWorkforceRoleSchema } = require("../workforce-role-schema");
 
 const router = express.Router();
 
-router.get("/departments", requirePerm("employees", "view"), async (req, res, next) => {
+router.get("/departments", requirePerm("departments", "view"), async (req, res, next) => {
   try {
     await ensureWorkforceRoleSchema();
     const params = [];

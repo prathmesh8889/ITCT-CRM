@@ -47,13 +47,44 @@ const newRefreshHash = () => sha256(crypto.randomBytes(32).toString("hex"));
 // ---------------- RBAC catalog ----------------
 const MODULES = ["dashboard", "targets", "leads", "discovery", "customers", "companies", "contacts", "deals",
   "followups", "tasks", "meetings", "calendar", "calls", "products", "quotations", "invoices", "payments",
-  "expenses", "employees", "teams", "reports", "notifications", "automation", "audit", "settings"];
+  "expenses", "employees", "teams", "departments", "access_levels", "reports", "notifications",
+  "automation", "audit", "settings"];
 const PERMS = ["view", "create", "edit", "delete", "assign", "export", "approve"];
 const SUPER_ROLES = new Set(["Super Admin", "Admin"]);
+const SUPER_ADMIN_ROLE = "Super Admin";
+const MODULE_ALIASES = { departments: "employees", access_levels: "employees" };
 
-const rolePerms = (roleName, perms, module, perm) => {
-  if (SUPER_ROLES.has(roleName)) return true;
-  return Array.isArray(perms?.[module]) && perms[module].includes(perm);
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
+const cleanPermissionMap = (value = {}) => {
+  const out = {};
+  for (const [module, perms] of Object.entries(value || {})) {
+    if (!MODULES.includes(module)) continue;
+    out[module] = Array.isArray(perms) ? [...new Set(perms.filter((p) => PERMS.includes(p)))] : [];
+  }
+  return out;
+};
+const defaultModulePerms = (roleName, perms, module) => {
+  if (roleName === SUPER_ADMIN_ROLE || roleName === "Admin") return [...PERMS];
+  const direct = Array.isArray(perms?.[module]) ? perms[module] : null;
+  if (direct) return direct.filter((p) => PERMS.includes(p));
+  const alias = MODULE_ALIASES[module];
+  return alias && Array.isArray(perms?.[alias]) ? perms[alias].filter((p) => PERMS.includes(p)) : [];
+};
+const effectivePermissionMap = (roleName, perms, overrides = {}) => {
+  const cleaned = cleanPermissionMap(overrides);
+  const out = {};
+  for (const module of MODULES) {
+    if (roleName === SUPER_ADMIN_ROLE) out[module] = [...PERMS];
+    else if (hasOwn(cleaned, module)) out[module] = cleaned[module];
+    else out[module] = defaultModulePerms(roleName, perms, module);
+  }
+  return out;
+};
+const rolePerms = (roleName, perms, module, perm, overrides = {}) => {
+  if (roleName === SUPER_ADMIN_ROLE) return true;
+  const cleaned = cleanPermissionMap(overrides);
+  const list = hasOwn(cleaned, module) ? cleaned[module] : defaultModulePerms(roleName, perms, module);
+  return Array.isArray(list) && list.includes(perm);
 };
 
 async function enforceDepartmentRole(user, role) {
@@ -109,7 +140,7 @@ async function requireAuth(req, _res, next) {
 
 function requirePerm(module, perm) {
   return [requireAuth, (req, _res, next) => {
-    if (!rolePerms(req.role.name, req.role.perms, module, perm))
+    if (!rolePerms(req.role.name, req.role.perms, module, perm, req.user.permission_overrides || {}))
       return next(new HttpError(403, `Permission denied: ${perm} on ${module}`));
     next();
   }];
@@ -148,7 +179,8 @@ const ensureInvoice = (req, id) => ensureRow(req, "invoices", id, "created_by");
 
 module.exports = {
   hashPassword, verifyPassword, passwordPolicyError, signAccess, signRefresh, verifyJwt, newRefreshHash,
-  MODULES, PERMS, SUPER_ROLES, rolePerms, requireAuth, requirePerm, isWide,
+  MODULES, PERMS, SUPER_ROLES, SUPER_ADMIN_ROLE, MODULE_ALIASES,
+  cleanPermissionMap, defaultModulePerms, effectivePermissionMap, rolePerms, requireAuth, requirePerm, isWide,
   applyOwnership, ensureLead, ensureCustomer, ensureDeal, ensureFollowup, ensureTask,
   ensureQuotation, ensureInvoice,
 };

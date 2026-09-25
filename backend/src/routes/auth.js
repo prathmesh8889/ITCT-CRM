@@ -5,7 +5,7 @@ const express = require("express");
 const jwt = require("jsonwebtoken");
 const { db } = require("../db");
 const { config, HttpError, sha256 } = require("../core");
-const { hashPassword, verifyPassword, passwordPolicyError, signAccess, signRefresh, verifyJwt, newRefreshHash, requireAuth } = require("../security");
+const { hashPassword, verifyPassword, passwordPolicyError, signAccess, signRefresh, verifyJwt, newRefreshHash, requireAuth, effectivePermissionMap, SUPER_ADMIN_ROLE } = require("../security");
 const { ensureAuthSchema } = require("../auth-schema");
 
 const router = express.Router();
@@ -99,9 +99,10 @@ router.post("/logout", requireAuth, async (req, res, next) => {
 
 router.get("/me", requireAuth, async (req, res, next) => {
   try {
-    const { password_hash, ...user } = req.user;
-    res.json({ user, role: req.role.name, perms: req.role.perms || {},
-               is_super: ["Super Admin", "Admin"].includes(req.role.name) });
+    const { password_hash, permission_overrides, ...user } = req.user;
+    const perms = effectivePermissionMap(req.role.name, req.role.perms || {}, req.user.permission_overrides || {});
+    res.json({ user, role: req.role.name, perms,
+               is_super: req.role.name === SUPER_ADMIN_ROLE });
   } catch (e) { next(e); }
 });
 

@@ -11,7 +11,7 @@ const audit = (user, action, target, detail = "") =>
     "INSERT INTO audit_logs (user_id, user_name, action, target, detail) VALUES ($1,$2,$3,$4,$5)",
     [user?.id ?? null, user?.name ?? "system", action, target, detail],
   );
-const safeUser = (u) => { const { password_hash, ...rest } = u; return rest; };
+const safeUser = (u) => { const { password_hash, permission_overrides, ...rest } = u; return rest; };
 const isoDate = /^\d{4}-\d{2}-\d{2}$/;
 const clock = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -76,7 +76,7 @@ router.patch("/users/:id", requireAuth, validateDepartmentAssignment, (_req, _re
 router.use("/ai", (_req, res) => res.status(404).json({ detail: "Not Found" }));
 
 // ================= DEPARTMENTS =================
-router.get("/departments", requirePerm("employees", "view"), async (_req, res, next) => {
+router.get("/departments", requirePerm("departments", "view"), async (_req, res, next) => {
   try {
     await ensureOrganizationSchema();
     const rows = await db.all(`
@@ -92,7 +92,7 @@ router.get("/departments", requirePerm("employees", "view"), async (_req, res, n
   } catch (e) { next(e); }
 });
 
-router.post("/departments", requirePerm("employees", "create"), async (req, res, next) => {
+router.post("/departments", requirePerm("departments", "create"), async (req, res, next) => {
   try {
     await ensureOrganizationSchema();
     const b = req.body || {};
@@ -116,7 +116,7 @@ router.post("/departments", requirePerm("employees", "create"), async (req, res,
   } catch (e) { next(e); }
 });
 
-router.patch("/departments/:id", requirePerm("employees", "edit"), async (req, res, next) => {
+router.patch("/departments/:id", requirePerm("departments", "edit"), async (req, res, next) => {
   try {
     await ensureOrganizationSchema();
     const id = Number(req.params.id);
@@ -162,7 +162,7 @@ router.patch("/departments/:id", requirePerm("employees", "edit"), async (req, r
   } catch (e) { next(e); }
 });
 
-router.delete("/departments/:id", requirePerm("employees", "delete"), async (req, res, next) => {
+router.delete("/departments/:id", requirePerm("departments", "delete"), async (req, res, next) => {
   try {
     await ensureOrganizationSchema();
     const id = Number(req.params.id);
