@@ -61,7 +61,7 @@ function addSales(perms, level) {
   } else if (level === 5) {
     add(perms, "targets", ["view"]);
     add(perms, "leads", ["view", "edit"]);
-    add(perms, "discovery", ["view"]);
+    add(perms, "discovery", ["view", "create"]);
     add(perms, "customers", ["view", "create"]);
     add(perms, "companies", ["view"]);
     add(perms, "contacts", ["view", "create"]);
@@ -71,7 +71,7 @@ function addSales(perms, level) {
   } else if (level === 6) {
     add(perms, "targets", ["view"]);
     add(perms, "leads", ["view"]); // assigned leads only; PII is masked centrally
-    add(perms, "discovery", ["view"]);
+    add(perms, "discovery", ["view", "create"]);
   }
 }
 
