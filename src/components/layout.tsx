@@ -4,7 +4,7 @@ import {
   LayoutDashboard, BarChart3, Target, Radar, LayoutGrid, Users, PhoneCall, ListChecks,
   CalendarDays, Calendar, FileText, Receipt, Package, Briefcase, Zap, History, Settings,
   Bell, Search, Sun, Moon, Menu as MenuIcon, X, LogOut, CheckCheck, ChevronLeft, Database,
-  Building2, ShieldAlert, UserRound,
+  Building2, ShieldAlert, ShieldCheck, UserRound,
 } from "lucide-react";
 import { useStore } from "../store";
 import { useDB } from "../lib/db";
@@ -14,7 +14,7 @@ import type { ApiNotice } from "../lib/apiTypes";
 import { Avatar, Badge, statusTone } from "./ui";
 import type { ModuleKey } from "../lib/types";
 
-type NavItem = { to: string; label: string; icon: typeof Target; mod?: ModuleKey };
+type NavItem = { to: string; label: string; icon: typeof Target; mod?: ModuleKey; superOnly?: boolean };
 const NAV: { section: string; items: NavItem[] }[] = [
   { section: "Overview", items: [
     { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, mod: "dashboard" },
@@ -41,8 +41,9 @@ const NAV: { section: string; items: NavItem[] }[] = [
   { section: "Administration", items: [
     { to: "/employees", label: "Employees", icon: Briefcase, mod: "employees" },
     { to: "/teams", label: "Teams", icon: Users, mod: "teams" },
-    { to: "/departments", label: "Departments", icon: Building2, mod: "employees" },
-    { to: "/access-levels", label: "Access Levels", icon: ShieldAlert, mod: "employees" },
+    { to: "/departments", label: "Departments", icon: Building2, mod: "departments" },
+    { to: "/access-levels", label: "Access Levels", icon: ShieldAlert, mod: "access_levels" },
+    { to: "/access-control", label: "Employee Access", icon: ShieldCheck, superOnly: true },
     { to: "/automation", label: "Automation Rules", icon: Zap, mod: "automation" },
     { to: "/audit", label: "Audit Log", icon: History, mod: "audit" },
     { to: "/settings", label: "Settings", icon: Settings, mod: "settings" },
@@ -64,7 +65,7 @@ function SideNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
       </div>
 
       {NAV.map((sec) => {
-        const items = sec.items.filter((i) => !i.mod || can(i.mod, "view"));
+        const items = sec.items.filter((i) => (!i.superOnly || roleName === "Super Admin") && (!i.mod || can(i.mod, "view")));
         if (!items.length) return null;
         return <div key={sec.section} className="mb-3">
           {!collapsed && <div className="mb-1 px-2 text-[9.5px] font-bold uppercase tracking-[0.16em] text-white/25">{sec.section}</div>}
