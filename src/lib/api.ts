@@ -125,6 +125,12 @@ export const authApi = {
 };
 
 // ---------- leads ----------
+export const adsLeadApi = {
+  list: (q?: Query) => api.get("/ads-leads", { params: q }),
+  status: () => api.get("/ads-leads/status"),
+  retry: (id: number) => api.post(`/ads-leads/${id}/retry`),
+};
+
 export const leadApi = {
   list: (q?: Query) => api.get<Paged<unknown>>("/leads", { params: q }),
   get: (id: number) => api.get(`/leads/${id}`),
