@@ -23,6 +23,9 @@ function UserModal({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const save = async () => {
     if (!f.name.trim() || !f.email.trim()) { toast("Name and email required", "err"); return; }
+    if (f.password.length < 12 || !/[a-z]/.test(f.password) || !/[A-Z]/.test(f.password) || !/\d/.test(f.password) || !/[^A-Za-z0-9]/.test(f.password)) {
+      toast("Temporary password must be 12+ characters with uppercase, lowercase, number and symbol", "err"); return;
+    }
     if (d.users.some((u) => u.email.toLowerCase() === f.email.toLowerCase())) { toast("Email already exists", "err"); return; }
     const roleName = d.roles.find((r) => r.id === f.roleId)?.name || "";
     const isSales = roleName === "Sales Executive";
