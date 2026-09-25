@@ -33,7 +33,7 @@ import Settings from "./pages/Settings";
 import type { ModuleKey } from "./lib/types";
 
 function NoAccess() {
-  return <div className="flex h-full items-center justify-center p-6"><div className="card a-scale-in max-w-sm p-8 text-center"><ShieldAlert size={30} className="mx-auto text-amber-500"/><h2 className="hd mt-3 text-[17px]">No permission</h2><p className="mt-1 text-[13px] text-ink-500">This module is not available to your current Workforce OS role. Access is controlled by the approved organizational policy.</p></div></div>;
+  return <div className="flex h-full items-center justify-center p-6"><div className="card a-scale-in max-w-sm p-8 text-center"><ShieldAlert size={30} className="mx-auto text-amber-500"/><h2 className="hd mt-3 text-[17px]">No permission</h2><p className="mt-1 text-[13px] text-ink-500">This page is not available to your account. Access is controlled by your role and the Super Admin employee-access settings.</p></div></div>;
 }
 
 function Guard({ mod, children }: { mod: ModuleKey; children: ReactElement }) {
@@ -69,7 +69,7 @@ function Root() {
       <Route path="/profile/:id" element={<UserProfile/>}/>
       <Route path="/dashboard" element={<Guard mod="dashboard"><Dashboard/></Guard>}/>
       <Route path="/targets" element={<Guard mod="targets"><SalesTargets/></Guard>}/>
-      <Route path="/department-workspace" element={<Guard mod="departments"><><DepartmentTeamWorkPanel/><DepartmentWorkspace/></></Guard>}/>
+      <Route path="/department-workspace" element={<><DepartmentTeamWorkPanel/><DepartmentWorkspace/></>}/>
       <Route path="/leads" element={<Guard mod="leads"><Leads/></Guard>}/>
       <Route path="/discovery" element={<Guard mod="discovery"><Discovery/></Guard>}/>
       <Route path="/pipeline" element={<Guard mod="deals"><Pipeline/></Guard>}/>
