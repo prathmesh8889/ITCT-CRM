@@ -202,4 +202,25 @@ router.patch("/teams/:id", requirePerm("teams", "edit"), async (req, res, next) 
   } catch (e) { next(e); }
 });
 
+
+router.delete("/teams/:id", requirePerm("teams", "delete"), async (req, res, next) => {
+  try {
+    await ensureWorkforceRoleSchema();
+    await ensureTeamSchema();
+    const id = Number(req.params.id);
+    const current = await db.one("SELECT * FROM teams WHERE id = $1 AND active = TRUE", [id]);
+    if (!current) throw new HttpError(404, "Team not found");
+    assertDepartmentManager(req, current.department);
+
+    await db.tx(async (c) => {
+      await c.query("UPDATE users SET team_id = NULL WHERE team_id = $1", [id]);
+      await c.query("UPDATE leads SET assigned_team_id = NULL WHERE assigned_team_id = $1", [id]);
+      await c.query("UPDATE lead_assignments SET team_id = NULL WHERE team_id = $1", [id]);
+      await c.query("UPDATE teams SET active = FALSE, lead_user_id = NULL, updated_at = now() WHERE id = $1", [id]);
+    });
+    await audit(req, "Team Deleted", `team:${current.name}`, current.department || "");
+    res.json({ ok: true, archived: true });
+  } catch (e) { next(e); }
+});
+
 module.exports = router;
