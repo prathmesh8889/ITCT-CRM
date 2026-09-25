@@ -9,7 +9,7 @@ const path = require("path");
 const crypto = require("crypto");
 const { db } = require("../db");
 const { config, HttpError, money, computeTotals, nextCode } = require("../core");
-const { requirePerm, ensureQuotation, ensureInvoice } = require("../security");
+const { requirePerm, ensureCustomer, ensureQuotation, ensureInvoice } = require("../security");
 const { runTriggers } = require("../engines");
 
 const router = express.Router();
@@ -147,6 +147,7 @@ router.post("/quotations", requirePerm("quotations", "create"), async (req, res,
   try {
     const b = req.body || {};
     if (!b.customer_id) throw new HttpError(422, "customer_id is required");
+    await ensureCustomer(req, Number(b.customer_id));
     const items = cleanItems(b.items);
     if (!items.length) throw new HttpError(422, "At least one line item is required");
     const totals = computeTotals(items);
@@ -169,7 +170,10 @@ router.patch("/quotations/:id", requirePerm("quotations", "edit"), async (req, r
   try {
     const q = await ensureQuotation(req, Number(req.params.id));
     const b = req.body || {};
-    if (b.customer_id) await db.query("UPDATE quotations SET customer_id = $1 WHERE id = $2", [b.customer_id, q.id]);
+    if (b.customer_id) {
+      await ensureCustomer(req, Number(b.customer_id));
+      await db.query("UPDATE quotations SET customer_id = $1 WHERE id = $2", [b.customer_id, q.id]);
+    }
     if (b.date) await db.query("UPDATE quotations SET date = $1 WHERE id = $2", [b.date, q.id]);
     if (b.valid_until) await db.query("UPDATE quotations SET valid_until = $1 WHERE id = $2", [b.valid_until, q.id]);
     if (b.terms !== undefined) await db.query("UPDATE quotations SET terms = $1 WHERE id = $2", [b.terms, q.id]);
@@ -240,6 +244,7 @@ router.post("/invoices", requirePerm("invoices", "create"), async (req, res, nex
   try {
     const b = req.body || {};
     if (!b.customer_id) throw new HttpError(422, "customer_id is required");
+    await ensureCustomer(req, Number(b.customer_id));
     const items = cleanItems(b.items);
     if (!items.length) throw new HttpError(422, "At least one line item is required");
     if (b.due_date && b.invoice_date && b.due_date < b.invoice_date) throw new HttpError(422, "due_date cannot be before invoice_date");
@@ -261,7 +266,10 @@ router.patch("/invoices/:id", requirePerm("invoices", "edit"), async (req, res, 
   try {
     const inv = await ensureInvoice(req, Number(req.params.id));
     const b = req.body || {};
-    if (b.customer_id) await db.query("UPDATE invoices SET customer_id = $1 WHERE id = $2", [b.customer_id, inv.id]);
+    if (b.customer_id) {
+      await ensureCustomer(req, Number(b.customer_id));
+      await db.query("UPDATE invoices SET customer_id = $1 WHERE id = $2", [b.customer_id, inv.id]);
+    }
     if (b.invoice_date) await db.query("UPDATE invoices SET invoice_date = $1 WHERE id = $2", [b.invoice_date, inv.id]);
     if (b.due_date) await db.query("UPDATE invoices SET due_date = $1 WHERE id = $2", [b.due_date, inv.id]);
     if (b.notes !== undefined) await db.query("UPDATE invoices SET notes = $1 WHERE id = $2", [b.notes, inv.id]);
