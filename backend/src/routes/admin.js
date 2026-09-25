@@ -15,7 +15,7 @@ const audit = (user, action, target, detail = "") =>
   db.query("INSERT INTO audit_logs (user_id, user_name, action, target, detail) VALUES ($1,$2,$3,$4,$5)",
     [user?.id ?? null, user?.name ?? "system", action, target, detail]);
 const num = (v) => (v === null || v === undefined ? v : Number(v));
-const safeUser = (u) => { const { password_hash, ...rest } = u; return rest; };
+const safeUser = (u) => { const { password_hash, permission_overrides, ...rest } = u; return rest; };
 const superAdminOnly = (req, _res, next) =>
   req.role?.name === SUPER_ADMIN_ROLE ? next() : next(new HttpError(403, "Super Admin access required"));
 
