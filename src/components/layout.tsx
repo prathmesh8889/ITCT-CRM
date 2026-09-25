@@ -21,6 +21,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
     { to: "/reports", label: "Reports & Analytics", icon: BarChart3, mod: "reports" },
   ]},
   { section: "Sales", items: [
+    { to: "/targets", label: "Sales Targets", icon: Target, mod: "targets" },
     { to: "/leads", label: "Leads", icon: Target, mod: "leads" },
     { to: "/discovery", label: "Lead Discovery", icon: Radar, mod: "discovery" },
     { to: "/pipeline", label: "Pipeline", icon: LayoutGrid, mod: "deals" },
