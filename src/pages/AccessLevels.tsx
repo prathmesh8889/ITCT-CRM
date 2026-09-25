@@ -23,6 +23,7 @@ type EmployeeRow = {
   department?: string;
   designation?: string;
   role_id: number | string;
+  role_name?: string;
   access_level?: number;
   active?: boolean;
 };
@@ -57,10 +58,10 @@ export default function AccessLevels() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
 
-  const roleName = (roleId: number | string) => d.roles.find((r) => String(r.id) === String(roleId))?.name || "No role";
+  const roleName = (roleId: number | string, fallback?: string) => fallback || d.roles.find((r) => String(r.id) === String(roleId))?.name || "No role";
   const levelOf = (employee: EmployeeRow): LevelNumber => {
     const n = Number(employee.access_level);
-    return Number.isInteger(n) && n >= 1 && n <= 6 ? n as LevelNumber : inferredLevel(roleName(employee.role_id));
+    return Number.isInteger(n) && n >= 1 && n <= 6 ? n as LevelNumber : inferredLevel(roleName(employee.role_id, employee.role_name));
   };
 
   const load = async () => {
@@ -79,7 +80,7 @@ export default function AccessLevels() {
       }
       const [catalog, users] = await Promise.all([
         api.get<{ levels: LevelDef[] }>("/access-levels"),
-        api.get<EmployeeRow[]>("/users"),
+        api.get<EmployeeRow[]>("/access-level-users"),
       ]);
       setLevels(catalog.data.levels || baseLevels);
       setEmployees(users.data || []);
@@ -95,7 +96,7 @@ export default function AccessLevels() {
     if (!q) return employees;
     return employees.filter((u) => {
       const l = levelOf(u);
-      return `${u.name} ${u.email} ${u.phone || ""} ${u.department || ""} ${u.designation || ""} ${roleName(u.role_id)} L${l}`.toLowerCase().includes(q);
+      return `${u.name} ${u.email} ${u.phone || ""} ${u.department || ""} ${u.designation || ""} ${roleName(u.role_id, u.role_name)} L${l}`.toLowerCase().includes(q);
     });
   }, [employees, query, d.roles]);
 
@@ -157,7 +158,7 @@ export default function AccessLevels() {
                   <Badge tone={tone(current)}>L{current}</Badge>
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
-                  <div><span className="text-ink-400">Role</span><div className="mt-0.5 truncate font-medium">{roleName(employee.role_id)}</div></div>
+                  <div><span className="text-ink-400">Role</span><div className="mt-0.5 truncate font-medium">{roleName(employee.role_id, employee.role_name)}</div></div>
                   <div><span className="text-ink-400">Status</span><div className="mt-0.5 font-medium">{employee.active === false ? "Disabled" : "Active"}</div></div>
                   <div><span className="text-ink-400">Department</span><div className="mt-0.5 truncate font-medium">{employee.department || "Global"}</div></div>
                   <div><span className="text-ink-400">Level scope</span><div className="mt-0.5 truncate font-medium">{def?.scope || "—"}</div></div>
