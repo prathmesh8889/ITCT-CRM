@@ -39,6 +39,7 @@ function addCommon(perms, level) {
 
 function addSales(perms, level) {
   if (level === 3) {
+    add(perms, "targets", ["view", "create", "edit", "delete", "assign"]);
     add(perms, "leads", ["view", "create", "edit", "assign"]);
     add(perms, "discovery", ["view", "create", "edit", "delete"]);
     add(perms, "customers", ["view", "create", "edit"]);
@@ -48,7 +49,8 @@ function addSales(perms, level) {
     add(perms, "followups", ["view", "create", "edit"]);
     add(perms, "quotations", ["view", "create", "edit", "approve"]);
   } else if (level === 4) {
-    add(perms, "leads", ["view", "edit", "assign"]);
+    add(perms, "targets", ["view"]);
+    add(perms, "leads", ["view", "edit"]);
     add(perms, "discovery", ["view", "create", "edit"]);
     add(perms, "customers", ["view", "edit"]);
     add(perms, "companies", ["view", "edit"]);
@@ -57,8 +59,9 @@ function addSales(perms, level) {
     add(perms, "followups", ["view", "create", "edit"]);
     add(perms, "quotations", ["view", "edit"]);
   } else if (level === 5) {
-    add(perms, "leads", ["view", "create", "edit"]);
-    add(perms, "discovery", ["view", "create"]);
+    add(perms, "targets", ["view"]);
+    add(perms, "leads", ["view", "edit"]);
+    add(perms, "discovery", ["view"]);
     add(perms, "customers", ["view", "create"]);
     add(perms, "companies", ["view"]);
     add(perms, "contacts", ["view", "create"]);
@@ -66,8 +69,9 @@ function addSales(perms, level) {
     add(perms, "followups", ["view", "create", "edit"]);
     add(perms, "quotations", ["view", "create", "edit"]);
   } else if (level === 6) {
-    add(perms, "leads", ["view"]); // JSON PII is masked centrally
-    add(perms, "discovery", ["view", "create"]);
+    add(perms, "targets", ["view"]);
+    add(perms, "leads", ["view"]); // assigned leads only; PII is masked centrally
+    add(perms, "discovery", ["view"]);
   }
 }
 
