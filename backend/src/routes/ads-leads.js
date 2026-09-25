@@ -69,7 +69,7 @@ function pick(obj, ...keys) {
 }
 
 function filteredExtras(input) {
-  const blocked = /(password|passwd|secret|token|authorization|cookie|card|cvv|aadhaar|aadhar|pan_number|otp)/i;
+  const blocked = /(password|passwd|secret|token|authorization|cookie|card|cvv|aadhaar|aadhar|pan_number|otp|email|phone|mobile|whatsapp|full_name|first_name|last_name)/i;
   const out = {};
   for (const [key, value] of Object.entries(input || {})) {
     if (blocked.test(key)) continue;
