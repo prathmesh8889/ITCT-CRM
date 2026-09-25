@@ -6,6 +6,15 @@ const { HttpError } = require("./core");
 
 const norm = (v) => String(v || "").trim().toLowerCase();
 const isGlobalAdmin = (req) => ["Super Admin", "Admin"].includes(String(req?.role?.name || ""));
+const isSalesDepartment = (req) => norm(req?.user?.department) === "sales & business development";
+
+function isSalesAssignmentAuthority(req) {
+  if (isGlobalAdmin(req)) return true;
+  const roleName = norm(req?.role?.name);
+  const level = Number(req?.accessLevel || req?.user?.access_level || 6);
+  if (roleName === "ceo" || roleName.includes("director")) return true;
+  return isSalesDepartment(req) && level === 3 && roleName.includes("sales manager");
+}
 
 function scopeMode(req) {
   if (isGlobalAdmin(req)) return "global";
@@ -57,4 +66,4 @@ function canManageTarget(req, target) {
   return Number(req.user.id) === Number(target.id);
 }
 
-module.exports = { norm, isGlobalAdmin, scopeMode, scopedUserIds, canSeeDepartment, assertDepartment, canManageTarget };
+module.exports = { norm, isGlobalAdmin, isSalesDepartment, isSalesAssignmentAuthority, scopeMode, scopedUserIds, canSeeDepartment, assertDepartment, canManageTarget };
