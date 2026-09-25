@@ -27,6 +27,7 @@ import EmployeeManagement from "./pages/EmployeeManagement";
 import TeamsPage from "./pages/Teams";
 import Departments from "./pages/DepartmentsV3";
 import AccessLevels from "./pages/AccessLevels";
+import AccessControl from "./pages/AccessControl";
 import { AutomationPage, AuditPage } from "./pages/Admin";
 import Settings from "./pages/Settings";
 import type { ModuleKey } from "./lib/types";
@@ -39,6 +40,13 @@ function Guard({ mod, children }: { mod: ModuleKey; children: ReactElement }) {
   const { user, can } = useStore();
   if (!user) return <Navigate to="/login" replace />;
   if (!can(mod)) return <NoAccess />;
+  return children;
+}
+
+function SuperAdminGuard({ children }: { children: ReactElement }) {
+  const { user, roleName } = useStore();
+  if (!user) return <Navigate to="/login" replace />;
+  if (roleName !== "Super Admin") return <NoAccess />;
   return children;
 }
 
@@ -61,7 +69,7 @@ function Root() {
       <Route path="/profile/:id" element={<UserProfile/>}/>
       <Route path="/dashboard" element={<Guard mod="dashboard"><Dashboard/></Guard>}/>
       <Route path="/targets" element={<Guard mod="targets"><SalesTargets/></Guard>}/>
-      <Route path="/department-workspace" element={<><DepartmentTeamWorkPanel/><DepartmentWorkspace/></>}/>
+      <Route path="/department-workspace" element={<Guard mod="departments"><><DepartmentTeamWorkPanel/><DepartmentWorkspace/></></Guard>}/>
       <Route path="/leads" element={<Guard mod="leads"><Leads/></Guard>}/>
       <Route path="/discovery" element={<Guard mod="discovery"><Discovery/></Guard>}/>
       <Route path="/pipeline" element={<Guard mod="deals"><Pipeline/></Guard>}/>
@@ -77,9 +85,10 @@ function Root() {
       <Route path="/assistant" element={<Navigate to="/dashboard" replace />} />
       <Route path="/employees" element={<Guard mod="employees"><EmployeeManagement/></Guard>}/>
       <Route path="/teams" element={<Guard mod="teams"><TeamsPage/></Guard>}/>
-      <Route path="/access-levels" element={<Guard mod="employees"><AccessLevels/></Guard>}/>
-      <Route path="/departments" element={<Guard mod="employees"><Departments/></Guard>}/>
-      <Route path="/access-settings" element={<Navigate to="/departments" replace />} />
+      <Route path="/access-levels" element={<Guard mod="access_levels"><AccessLevels/></Guard>}/>
+      <Route path="/departments" element={<Guard mod="departments"><Departments/></Guard>}/>
+      <Route path="/access-control" element={<SuperAdminGuard><AccessControl/></SuperAdminGuard>}/>
+      <Route path="/access-settings" element={<Navigate to="/access-control" replace />} />
       <Route path="/automation" element={<Guard mod="automation"><AutomationPage/></Guard>}/>
       <Route path="/audit" element={<Guard mod="audit"><AuditPage/></Guard>}/>
       <Route path="/settings" element={<Guard mod="settings"><Settings/></Guard>}/>
