@@ -295,9 +295,8 @@ router.delete("/invoices/:id", requirePerm("invoices", "delete"), async (req, re
   try {
     const inv = await ensureInvoice(req, Number(req.params.id));
     const payments = await db.one("SELECT COUNT(*)::int AS n FROM payments WHERE invoice_id=$1", [inv.id]);
-    if (Number(payments?.n || 0) > 0) throw new HttpError(409, "Invoice has payments and cannot be deleted. Reverse/remove the payments first.");
-    if (!["Draft", "Cancelled"].includes(inv.status))
-      throw new HttpError(409, "Only Draft or Cancelled invoices without payments can be deleted");
+    if (Number(payments?.n || 0) > 0)
+      throw new HttpError(409, "Invoice has payments and cannot be deleted. Delete/reverse the payments first.");
     await db.query("DELETE FROM invoices WHERE id=$1", [inv.id]);
     await audit(req.user, "Invoice Deleted", inv.invoice_number, inv.status);
     res.json({ ok: true });

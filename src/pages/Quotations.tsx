@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, Pencil, Copy, Printer, FileText, Send, Check, X, MessageCircle, ArrowRight } from "lucide-react";
+import { Plus, Pencil, Copy, Printer, FileText, Send, Check, X, Trash2, MessageCircle, ArrowRight } from "lucide-react";
 import { useStore } from "../store";
 import { mutate, useDB } from "../lib/db";
 import { docTotals, logAct, waLink, renderTemplate, fmtD, todayISO, addDaysISO, inr } from "../lib/services";
@@ -164,7 +164,7 @@ export default function Quotations() {
                 <td className="td"><Money v={docTotals(qt.items, qt.discountPct).total} className="font-semibold" /></td>
                 <td className="td"><Badge tone={statusTone(st)}>{st}</Badge></td>
                 <td className="td text-right" onClick={(e) => e.stopPropagation()}>
-                  <Menu align="right" trigger={<Btn variant="ghost" size="xs">⋯</Btn>}>
+                  <Menu align="right" trigger={<Btn variant="outline" size="xs">Actions</Btn>}>
                     <MenuItem onClick={() => doPrint(qt)}><Printer size={13} /> PDF / Print</MenuItem>
                     <MenuItem onClick={() => sendWhatsApp(qt)}><MessageCircle size={13} /> Send on WhatsApp</MenuItem>
                     {qt.status === "Draft" && can("quotations", "edit") && <MenuItem onClick={() => void setStatus(qt, "Sent")}><Send size={13} /> Mark sent</MenuItem>}
@@ -175,7 +175,7 @@ export default function Quotations() {
                     {(st === "Accepted" || st === "Sent") && can("invoices", "create") && <MenuItem onClick={() => void toInvoice(qt)}><ArrowRight size={13} /> Convert to invoice</MenuItem>}
                     {can("quotations", "create") && <MenuItem onClick={() => void duplicate(qt)}><Copy size={13} /> Duplicate</MenuItem>}
                     {can("quotations", "edit") && <MenuItem onClick={() => { setEditId(qt.id); setOpenId(null); }}><Pencil size={13} /> Edit</MenuItem>}
-                    {can("quotations", "delete") && <MenuItem danger onClick={() => void removeQuotation(qt)}><X size={13} /> Delete</MenuItem>}
+                    {can("quotations", "delete") && <MenuItem danger onClick={() => void removeQuotation(qt)}><Trash2 size={13} /> Delete</MenuItem>}
                   </Menu>
                 </td>
               </tr>
@@ -189,7 +189,11 @@ export default function Quotations() {
       {editId && <Modal open onClose={() => setEditId(null)} title={`Edit ${d.quotations.find((x) => x.id === editId)?.number}`} wide><QuoteModal initial={{ ...d.quotations.find((x) => x.id === editId)! }} onDone={() => setEditId(null)} editing /></Modal>}
       {open && (
         <Drawer open onClose={() => { setOpenId(null); setParams({}); }} title={<span className="num">{open.number}</span>}
-          headerExtra={<Btn variant="outline" size="sm" onClick={() => doPrint(open)}><Printer size={13} /> PDF</Btn>}>
+          headerExtra={<div className="flex flex-wrap gap-2">
+            <Btn variant="outline" size="sm" onClick={() => doPrint(open)}><Printer size={13} /> PDF</Btn>
+            {can("quotations", "edit") && <Btn variant="outline" size="sm" onClick={() => { setEditId(open.id); setOpenId(null); }}><Pencil size={13} /> Edit</Btn>}
+            {can("quotations", "delete") && <Btn variant="danger" size="sm" onClick={() => void removeQuotation(open)}><Trash2 size={13} /> Delete</Btn>}
+          </div>}>
           <div className="p-5">
             <div className="mb-4 grid grid-cols-3 gap-3">
               <div className="card p-3 text-center"><div className="text-[10px] font-bold uppercase tracking-wider text-ink-400">Total</div><Money v={docTotals(open.items, open.discountPct).total} className="text-lg font-bold text-brand-700 dark:text-brand-300" /></div>

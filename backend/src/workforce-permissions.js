@@ -47,7 +47,7 @@ function addSales(perms, level) {
     add(perms, "contacts", ["view", "create", "edit"]);
     add(perms, "deals", ["view", "create", "edit", "assign"]);
     add(perms, "followups", ["view", "create", "edit"]);
-    add(perms, "quotations", ["view", "create", "edit", "approve"]);
+    add(perms, "quotations", ["view", "create", "edit", "delete", "approve"]);
   } else if (level === 4) {
     add(perms, "targets", ["view"]);
     add(perms, "leads", ["view", "edit"]);
@@ -78,7 +78,7 @@ function addSales(perms, level) {
 function addFinance(perms, level) {
   if (level === 3) {
     for (const m of ["quotations", "invoices", "payments", "expenses", "products"])
-      add(perms, m, ["view", "create", "edit", "approve", "export"]);
+      add(perms, m, ["view", "create", "edit", "delete", "approve", "export"]);
   } else if (level === 4) {
     for (const m of ["quotations", "invoices", "payments", "expenses", "products"])
       add(perms, m, ["view", "create", "edit"]);

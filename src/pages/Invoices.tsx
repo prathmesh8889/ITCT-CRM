@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Plus, Printer, Receipt, Wallet, TrendingDown, MessageCircle, Send, Pencil, X, Download } from "lucide-react";
+import { Plus, Printer, Receipt, Wallet, TrendingDown, MessageCircle, Send, Pencil, Trash2, X, Download } from "lucide-react";
 import { useStore } from "../store";
 import { mutate, useDB } from "../lib/db";
 import { docTotals, paidFor, logAct, waLink, renderTemplate, toCSV, downloadFile, fmtD, todayISO, addDaysISO, inr } from "../lib/services";
@@ -268,14 +268,14 @@ export default function Invoices() {
                   <td className="td num font-semibold text-red-500">{bal ? inr(bal) : "—"}</td>
                   <td className="td"><Badge tone={statusTone(inv.status)}>{inv.status}</Badge></td>
                   <td className="td text-right" onClick={(e) => e.stopPropagation()}>
-                    <Menu align="right" trigger={<Btn variant="ghost" size="xs">⋯</Btn>}>
+                    <Menu align="right" trigger={<Btn variant="outline" size="xs">Actions</Btn>}>
                       <MenuItem onClick={() => doPrint(inv)}><Printer size={13} /> PDF / Print</MenuItem>
                       {can("payments", "create") && bal > 0 && <MenuItem onClick={() => setPayForId(inv.id)}><Wallet size={13} /> Record payment</MenuItem>}
                       {bal > 0 && <MenuItem onClick={() => sendReminder(inv)}><MessageCircle size={13} /> WhatsApp reminder</MenuItem>}
                       {inv.status === "Draft" && can("invoices", "edit") && <MenuItem onClick={() => void markSent(inv)}><Send size={13} /> Mark sent</MenuItem>}
-                      {inv.status === "Draft" && can("invoices", "edit") && <MenuItem onClick={() => setEditId(inv.id)}><Pencil size={13} /> Edit draft</MenuItem>}
+                      {!["Paid", "Cancelled"].includes(inv.status) && can("invoices", "edit") && <MenuItem onClick={() => setEditId(inv.id)}><Pencil size={13} /> Edit invoice</MenuItem>}
                       {inv.status === "Draft" && can("invoices", "edit") && <MenuItem danger onClick={() => void cancelInvoice(inv)}><X size={13} /> Cancel invoice</MenuItem>}
-                      {can("invoices", "delete") && ["Draft", "Cancelled"].includes(inv.status) && d.payments.every((p) => p.invoiceId !== inv.id) && <MenuItem danger onClick={() => void removeInvoice(inv)}><X size={13} /> Delete invoice</MenuItem>}
+                      {can("invoices", "delete") && d.payments.every((p) => p.invoiceId !== inv.id) && <MenuItem danger onClick={() => void removeInvoice(inv)}><Trash2 size={13} /> Delete invoice</MenuItem>}
                     </Menu>
                   </td>
                 </tr>
@@ -302,7 +302,7 @@ export default function Invoices() {
                 <td className="td num text-[11.5px] text-ink-400">{p.txnId || "—"}</td>
                 <td className="td num text-right font-bold text-emerald-600">{inr(p.amount)}</td>
                 <td className="td text-[12px] text-ink-400">{d.users.find((u) => u.id === p.recordedBy)?.name.split(" ")[0]}</td>
-                <td className="td"><div className="flex justify-end gap-1">{can("payments", "edit") && <button className="rounded p-1 text-ink-400 hover:text-brand-600" onClick={() => setEditPayment(p)}><Pencil size={13} /></button>}{can("payments", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => void removePayment(p)}><X size={13} /></button>}</div></td>
+                <td className="td"><div className="flex flex-wrap justify-end gap-1">{can("payments", "edit") && <Btn size="xs" variant="outline" onClick={() => setEditPayment(p)}><Pencil size={12} /> Edit</Btn>}{can("payments", "delete") && <Btn size="xs" variant="ghost" onClick={() => void removePayment(p)}><Trash2 size={12} /> Delete</Btn>}</div></td>
               </tr>
             ))}</tbody>
           </table>
@@ -335,7 +335,7 @@ export default function Invoices() {
       )}
 
       {modal && <Modal open onClose={() => setModal(false)} title="New invoice" wide><InvoiceModal initial={{ date: todayISO(), dueDate: addDaysISO(15) }} onDone={() => setModal(false)} editing={false} /></Modal>}
-      {editId && <Modal open onClose={() => setEditId(null)} title="Edit invoice draft" wide><InvoiceModal initial={{ ...d.invoices.find((x) => x.id === editId)! }} onDone={() => setEditId(null)} editing /></Modal>}
+      {editId && <Modal open onClose={() => setEditId(null)} title="Edit invoice" wide><InvoiceModal initial={{ ...d.invoices.find((x) => x.id === editId)! }} onDone={() => setEditId(null)} editing /></Modal>}
       {payForId && <Modal open onClose={() => setPayForId(null)} title="Record payment"><PaymentModal invoiceId={payForId === "any" ? undefined : payForId} onDone={() => setPayForId(null)} /></Modal>}
       {editPayment && <Modal open onClose={() => setEditPayment(null)} title="Edit payment"><PaymentModal payment={editPayment} onDone={() => setEditPayment(null)} /></Modal>}
       {expModal && (
@@ -351,7 +351,11 @@ export default function Invoices() {
         </Modal>
       )}
       {open && (
-        <Drawer open onClose={() => { setOpenId(null); setParams({ tab }); }} title={<span className="num">{open.number}</span>} headerExtra={<Btn variant="outline" size="sm" onClick={() => doPrint(open)}><Printer size={13} /> PDF</Btn>}>
+        <Drawer open onClose={() => { setOpenId(null); setParams({ tab }); }} title={<span className="num">{open.number}</span>} headerExtra={<div className="flex flex-wrap gap-2">
+          <Btn variant="outline" size="sm" onClick={() => doPrint(open)}><Printer size={13} /> PDF</Btn>
+          {!["Paid", "Cancelled"].includes(open.status) && can("invoices", "edit") && <Btn variant="outline" size="sm" onClick={() => { setEditId(open.id); setOpenId(null); }}><Pencil size={13} /> Edit</Btn>}
+          {can("invoices", "delete") && d.payments.every((p) => p.invoiceId !== open.id) && <Btn variant="danger" size="sm" onClick={() => void removeInvoice(open)}><Trash2 size={13} /> Delete</Btn>}
+        </div>}>
           <div className="p-5">
             {(() => {
               const t = docTotals(open.items, open.discountPct).total; const p = paidFor(d, open.id);
@@ -368,7 +372,7 @@ export default function Invoices() {
             {d.payments.filter((p) => p.invoiceId === open.id).map((p) => (
               <div key={p.id} className="mb-2 flex items-center justify-between rounded-md border border-ink-100 p-2.5 dark:border-ink-800">
                 <span className="text-[12.5px]">{fmtD(p.date)} · {p.mode}{p.txnId ? ` · ${p.txnId}` : ""}</span>
-                <span className="flex items-center gap-1"><Money v={p.amount} className="font-bold text-emerald-600" />{can("payments", "edit") && <button className="rounded p-1 text-ink-400 hover:text-brand-600" onClick={() => setEditPayment(p)}><Pencil size={12} /></button>}{can("payments", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => void removePayment(p)}><X size={12} /></button>}</span>
+                <span className="flex flex-wrap items-center justify-end gap-1"><Money v={p.amount} className="font-bold text-emerald-600" />{can("payments", "edit") && <Btn size="xs" variant="outline" onClick={() => setEditPayment(p)}><Pencil size={11} /> Edit</Btn>}{can("payments", "delete") && <Btn size="xs" variant="ghost" onClick={() => void removePayment(p)}><Trash2 size={11} /> Delete</Btn>}</span>
               </div>
             ))}
             {d.payments.filter((p) => p.invoiceId === open.id).length === 0 && <p className="text-[12.5px] text-ink-400">No payments yet.</p>}
