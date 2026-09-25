@@ -39,6 +39,7 @@ function addCommon(perms, level) {
 
 function addSales(perms, level) {
   if (level === 3) {
+    add(perms, "ads", ["view", "edit"]);
     add(perms, "targets", ["view", "create", "edit", "delete", "assign"]);
     add(perms, "leads", ["view", "create", "edit", "assign"]);
     add(perms, "discovery", ["view", "create", "edit", "delete"]);
@@ -93,6 +94,7 @@ function addFinance(perms, level) {
 
 function addMarketing(perms, level) {
   if (level === 3) {
+    add(perms, "ads", ["view"]);
     add(perms, "discovery", ["view", "create", "edit", "delete"]);
     add(perms, "leads", ["view", "create", "edit"]);
   } else if (level === 4) {
