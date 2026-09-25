@@ -49,6 +49,23 @@ router.get("/access-levels", requirePerm("access_levels", "view"), async (req, r
   } catch (e) { next(e); }
 });
 
+router.get("/access-level-users", requirePerm("access_levels", "view"), async (req, res, next) => {
+  try {
+    await ensureAccessLevelSchema();
+    const ids = isGlobalAdmin(req) ? null : await scopedUserIds(req);
+    const rows = ids === null
+      ? await db.all(`
+          SELECT u.*, r.name AS role_name
+            FROM users u LEFT JOIN roles r ON r.id=u.role_id
+           WHERE u.deleted_at IS NULL ORDER BY u.name`)
+      : (ids?.length ? await db.all(`
+          SELECT u.*, r.name AS role_name
+            FROM users u LEFT JOIN roles r ON r.id=u.role_id
+           WHERE u.deleted_at IS NULL AND u.id=ANY($1::int[]) ORDER BY u.name`, [ids]) : []);
+    res.json(rows.map(safeUser));
+  } catch (e) { next(e); }
+});
+
 router.patch("/users/:id/access-level", requirePerm("access_levels", "edit"), async (req, res, next) => {
   try {
     await ensureAccessLevelSchema();
