@@ -487,12 +487,13 @@ router.delete("/customers/:id", requirePerm("customers", "delete"), async (req, 
 // Customer notes are persisted in PostgreSQL and hydrated with the relationship panel.
 router.get("/customer-notes", requirePerm("customers", "view"), async (req, res, next) => {
   try {
-    const own = applyOwnership(req, "account_manager_id");
-    const rows = own.sql
-      ? await db.all(`SELECT n.* FROM notes n JOIN customers c ON c.id=n.entity_id
-                       WHERE n.entity_type='customer' AND c.deleted_at IS NULL AND c.account_manager_id=$1
-                       ORDER BY n.created_at DESC`, [req.user.id])
-      : await db.all("SELECT * FROM notes WHERE entity_type='customer' ORDER BY created_at DESC");
+    const ids = await scopedUserIds(req);
+    const rows = ids === null
+      ? await db.all("SELECT * FROM notes WHERE entity_type='customer' ORDER BY created_at DESC")
+      : await db.all(`SELECT n.* FROM notes n JOIN customers c ON c.id=n.entity_id
+                       WHERE n.entity_type='customer' AND c.deleted_at IS NULL
+                         AND c.account_manager_id = ANY($1::int[])
+                       ORDER BY n.created_at DESC`, [ids]);
     res.json(rows);
   } catch (e) { next(e); }
 });
