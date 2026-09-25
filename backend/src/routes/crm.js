@@ -9,7 +9,7 @@ const { db } = require("../db");
 const { HttpError, money, nextCode, normPhone, normDomain, normName, validateLead, parseCSV, toCSV } = require("../core");
 const { requireAuth, requirePerm, applyOwnership, ensureLead, ensureCustomer, ensureDeal, ensureFollowup, ensureTask } = require("../security");
 const { runTriggers, aiQualifyLead } = require("../engines");
-const { norm, isGlobalAdmin, isSalesAssignmentAuthority } = require("../workforce-scope");
+const { norm, isGlobalAdmin, isSalesAssignmentAuthority, scopedUserIds } = require("../workforce-scope");
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -487,12 +487,13 @@ router.delete("/customers/:id", requirePerm("customers", "delete"), async (req, 
 // Customer notes are persisted in PostgreSQL and hydrated with the relationship panel.
 router.get("/customer-notes", requirePerm("customers", "view"), async (req, res, next) => {
   try {
-    const own = applyOwnership(req, "account_manager_id");
-    const rows = own.sql
-      ? await db.all(`SELECT n.* FROM notes n JOIN customers c ON c.id=n.entity_id
-                       WHERE n.entity_type='customer' AND c.deleted_at IS NULL AND c.account_manager_id=$1
-                       ORDER BY n.created_at DESC`, [req.user.id])
-      : await db.all("SELECT * FROM notes WHERE entity_type='customer' ORDER BY created_at DESC");
+    const ids = await scopedUserIds(req);
+    const rows = ids === null
+      ? await db.all("SELECT * FROM notes WHERE entity_type='customer' ORDER BY created_at DESC")
+      : await db.all(`SELECT n.* FROM notes n JOIN customers c ON c.id=n.entity_id
+                       WHERE n.entity_type='customer' AND c.deleted_at IS NULL
+                         AND c.account_manager_id = ANY($1::int[])
+                       ORDER BY n.created_at DESC`, [ids]);
     res.json(rows);
   } catch (e) { next(e); }
 });
@@ -512,6 +513,33 @@ router.post("/customers/:id/notes", requirePerm("customers", "edit"), async (req
 });
 
 // ================= COMPANIES & CONTACTS =================
+async function visibleUserIds(req) {
+  const ids = await scopedUserIds(req);
+  return ids === null ? null : ids.map(Number).filter(Number.isInteger);
+}
+async function ensureCompanyScope(req, id) {
+  const row = await db.one("SELECT * FROM companies WHERE id=$1", [Number(id)]);
+  if (!row) throw new HttpError(404, "Company not found");
+  if (isGlobalAdmin(req)) return row;
+  const ids = await visibleUserIds(req);
+  if (!ids?.includes(Number(row.account_manager_id)))
+    throw new HttpError(403, "This company is outside your Workforce OS scope");
+  return row;
+}
+async function ensureContactScope(req, id) {
+  const row = await db.one(`
+    SELECT ct.*, c.account_manager_id AS company_manager_id
+      FROM contacts ct
+      LEFT JOIN companies c ON c.id=ct.company_id
+     WHERE ct.id=$1
+  `, [Number(id)]);
+  if (!row) throw new HttpError(404, "Contact not found");
+  if (isGlobalAdmin(req)) return row;
+  const ids = await visibleUserIds(req);
+  const owned = ids?.includes(Number(row.created_by)) || ids?.includes(Number(row.company_manager_id));
+  if (!owned) throw new HttpError(403, "This contact is outside your Workforce OS scope");
+  return row;
+}
 router.get("/companies", requirePerm("companies", "view"), async (req, res, next) => {
   try {
     const page = Math.max(1, Number(req.query.page) || 1);
@@ -534,7 +562,7 @@ router.post("/companies", requirePerm("companies", "create"), async (req, res, n
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
       [b.name, b.industry || "", b.website || "", b.phone || "", b.email || "", b.gst || "", b.pan || "",
        b.address || "", b.city || "", b.state || "", b.employee_count ?? null, b.annual_revenue ?? null,
-       b.account_manager_id ?? null, b.notes || ""]);
+       b.account_manager_id ?? req.user.id, b.notes || ""]);
     res.status(201).json(r.rows[0]);
   } catch (e) { next(e); }
 });
@@ -542,16 +570,30 @@ router.post("/companies", requirePerm("companies", "create"), async (req, res, n
 router.patch("/companies/:id", requirePerm("companies", "edit"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const row = await db.one("SELECT * FROM companies WHERE id = $1", [id]);
-    if (!row) throw new HttpError(404, "Company not found");
+    const row = await ensureCompanyScope(req, id);
     const allowed = ["name", "industry", "website", "phone", "email", "gst", "pan", "address", "city", "state",
                      "employee_count", "annual_revenue", "account_manager_id", "notes"];
     const patch = Object.entries(req.body || {}).filter(([k, v]) => allowed.includes(k) && v !== undefined);
     if (patch.length) {
-      const sets = patch.map(([k], i) => `${k} = $${i + 1}`).join(", ");
-      await db.query(`UPDATE companies SET ${sets} WHERE id = $${patch.length + 1}`, [...patch.map(([, v]) => v), id]);
+      const sets = patch.map(([k], i) => `${k} = ${i + 1}`).join(", ");
+      await db.query(`UPDATE companies SET ${sets} WHERE id = ${patch.length + 1}`, [...patch.map(([, v]) => v), id]);
     }
     res.json(await db.one("SELECT * FROM companies WHERE id = $1", [id]));
+  } catch (e) { next(e); }
+});
+
+router.delete("/companies/:id", requirePerm("companies", "delete"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const row = await ensureCompanyScope(req, id);
+    await db.tx(async (c) => {
+      await c.query("UPDATE contacts SET company_id = NULL WHERE company_id = $1", [id]);
+      await c.query("UPDATE deals SET company_id = NULL WHERE company_id = $1", [id]);
+      await c.query("UPDATE quotations SET company_id = NULL WHERE company_id = $1", [id]);
+      await c.query("DELETE FROM companies WHERE id = $1", [id]);
+    });
+    await activity(req.user.id, "Company Deleted", "companies", id, { name: row.name });
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
@@ -572,11 +614,12 @@ router.post("/contacts", requirePerm("contacts", "create"), async (req, res, nex
   try {
     const b = req.body || {};
     if (!b.first_name?.trim()) throw new HttpError(422, "first_name is required");
+    if (b.company_id != null) await ensureCompanyScope(req, Number(b.company_id));
     const r = await db.query(
-      `INSERT INTO contacts (first_name, last_name, company_id, designation, email, phone, whatsapp, address, city, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      `INSERT INTO contacts (first_name, last_name, company_id, designation, email, phone, whatsapp, address, city, notes, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
       [b.first_name, b.last_name || "", b.company_id ?? null, b.designation || "", b.email || "",
-       b.phone || "", b.whatsapp || "", b.address || "", b.city || "", b.notes || ""]);
+       b.phone || "", b.whatsapp || "", b.address || "", b.city || "", b.notes || "", req.user.id]);
     res.status(201).json(r.rows[0]);
   } catch (e) { next(e); }
 });
@@ -584,15 +627,25 @@ router.post("/contacts", requirePerm("contacts", "create"), async (req, res, nex
 router.patch("/contacts/:id", requirePerm("contacts", "edit"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const row = await db.one("SELECT * FROM contacts WHERE id = $1", [id]);
-    if (!row) throw new HttpError(404, "Contact not found");
+    const row = await ensureContactScope(req, id);
+    if (req.body?.company_id != null) await ensureCompanyScope(req, Number(req.body.company_id));
     const allowed = ["first_name", "last_name", "company_id", "designation", "email", "phone", "whatsapp", "address", "city", "notes"];
     const patch = Object.entries(req.body || {}).filter(([k, v]) => allowed.includes(k) && v !== undefined);
     if (patch.length) {
-      const sets = patch.map(([k], i) => `${k} = $${i + 1}`).join(", ");
-      await db.query(`UPDATE contacts SET ${sets} WHERE id = $${patch.length + 1}`, [...patch.map(([, v]) => v), id]);
+      const sets = patch.map(([k], i) => `${k} = ${i + 1}`).join(", ");
+      await db.query(`UPDATE contacts SET ${sets} WHERE id = ${patch.length + 1}`, [...patch.map(([, v]) => v), id]);
     }
     res.json(await db.one("SELECT * FROM contacts WHERE id = $1", [id]));
+  } catch (e) { next(e); }
+});
+
+router.delete("/contacts/:id", requirePerm("contacts", "delete"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const row = await ensureContactScope(req, id);
+    await db.query("DELETE FROM contacts WHERE id = $1", [id]);
+    await activity(req.user.id, "Contact Deleted", "contacts", id, { name: `${row.first_name} ${row.last_name || ""}`.trim() });
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
@@ -816,6 +869,19 @@ router.patch("/followups/:id", requirePerm("followups", "edit"), async (req, res
         [fu.lead_id, fu.employee_id, fu.type, when, fu.time, `Chained from follow-up #${fu.id}`]);
       await db.query("UPDATE leads SET next_followup_at = $1 WHERE id = $2", [when, fu.lead_id]);
     }
+    res.json({ ...(await db.one("SELECT * FROM followups WHERE id = $1", [fu.id])), date: String((await db.one("SELECT date FROM followups WHERE id = $1", [fu.id])).date).slice(0, 10) });
+  } catch (e) { next(e); }
+});
+
+router.delete("/followups/:id", requirePerm("followups", "delete"), async (req, res, next) => {
+  try {
+    const fu = await ensureFollowup(req, Number(req.params.id));
+    await db.query("DELETE FROM followups WHERE id = $1", [fu.id]);
+    if (fu.lead_id) {
+      const next = await db.one("SELECT date FROM followups WHERE lead_id=$1 AND status NOT IN ('Completed','Cancelled') ORDER BY date,time LIMIT 1", [fu.lead_id]);
+      await db.query("UPDATE leads SET next_followup_at=$1 WHERE id=$2", [next?.date || null, fu.lead_id]);
+    }
+    await activity(req.user.id, "Follow-up Deleted", "followups", fu.id, { type: fu.type, date: fu.date });
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
@@ -853,8 +919,8 @@ router.patch("/tasks/:id", requirePerm("tasks", "edit"), async (req, res, next) 
     const allowed = ["title", "description", "status", "priority", "due_date", "assigned_to_id"];
     const patch = Object.entries(req.body || {}).filter(([k, v]) => allowed.includes(k) && v !== undefined);
     if (patch.length) {
-      const sets = patch.map(([k], i) => `${k} = ${i + 1}`).join(", ");
-      await db.query(`UPDATE tasks SET ${sets} WHERE id = ${patch.length + 1}`, [...patch.map(([, v]) => v), Number(req.params.id)]);
+      const sets = patch.map(([k], i) => k + " = $" + (i + 1)).join(", ");
+      await db.query("UPDATE tasks SET " + sets + " WHERE id = $" + (patch.length + 1), [...patch.map(([, v]) => v), Number(req.params.id)]);
     }
     res.json({ ok: true });
   } catch (e) { next(e); }
@@ -868,6 +934,26 @@ router.delete("/tasks/:id", requirePerm("tasks", "delete"), async (req, res, nex
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
+
+async function ensureMeetingScope(req, id) {
+  const row = await db.one("SELECT * FROM meetings WHERE id=$1", [Number(id)]);
+  if (!row) throw new HttpError(404, "Meeting not found");
+  if (isGlobalAdmin(req)) return row;
+  const ids = await scopedUserIds(req);
+  const visible = new Set((ids || []).map(String));
+  const participants = Array.isArray(row.participants) ? row.participants.map(String) : [];
+  if (!participants.some((id) => visible.has(id)))
+    throw new HttpError(403, "This meeting is outside your Workforce OS scope");
+  return row;
+}
+async function assertMeetingParticipants(req, participants) {
+  if (isGlobalAdmin(req)) return;
+  const ids = await scopedUserIds(req);
+  const visible = new Set((ids || []).map(String));
+  for (const id of participants || []) {
+    if (!visible.has(String(id))) throw new HttpError(403, "A selected participant is outside your Workforce OS scope");
+  }
+}
 
 router.get("/meetings", requirePerm("meetings", "view"), async (req, res, next) => {
   try {
@@ -883,10 +969,12 @@ router.post("/meetings", requirePerm("meetings", "create"), async (req, res, nex
   try {
     const b = req.body || {};
     if (!b.title?.trim() || !b.date) throw new HttpError(422, "title and date are required");
+    const participants = Array.isArray(b.participants) && b.participants.length ? b.participants : [req.user.id];
+    await assertMeetingParticipants(req, participants);
     const r = await db.query(
       `INSERT INTO meetings (title, lead_id, customer_id, participants, date, start_time, end_time, location, meeting_link, agenda)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-      [b.title, b.lead_id ?? null, b.customer_id ?? null, JSON.stringify(b.participants || [req.user.id]),
+      [b.title, b.lead_id ?? null, b.customer_id ?? null, JSON.stringify(participants),
        b.date, b.start_time || "10:00", b.end_time || "11:00", b.location || "", b.meeting_link || "", b.agenda || ""]);
     await activity(req.user.id, "Meeting Created", "meetings", r.rows[0].id, { title: b.title, date: b.date });
     res.status(201).json({ id: r.rows[0].id });
@@ -896,15 +984,15 @@ router.post("/meetings", requirePerm("meetings", "create"), async (req, res, nex
 router.patch("/meetings/:id", requirePerm("meetings", "edit"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const current = await db.one("SELECT * FROM meetings WHERE id = $1", [id]);
-    if (!current) throw new HttpError(404, "Meeting not found");
+    const current = await ensureMeetingScope(req, id);
+    if (req.body?.participants !== undefined) await assertMeetingParticipants(req, req.body.participants);
     const allowed = ["title", "lead_id", "customer_id", "participants", "date", "start_time", "end_time",
       "location", "meeting_link", "agenda", "notes", "outcome"];
     const patch = Object.entries(req.body || {}).filter(([k, v]) => allowed.includes(k) && v !== undefined);
     if (patch.length) {
       const values = patch.map(([k, v]) => k === "participants" ? JSON.stringify(v || []) : v);
-      const sets = patch.map(([k], i) => `${k} = ${i + 1}`).join(", ");
-      await db.query(`UPDATE meetings SET ${sets} WHERE id = ${patch.length + 1}`, [...values, id]);
+      const sets = patch.map(([k], i) => k + " = $" + (i + 1)).join(", ");
+      await db.query("UPDATE meetings SET " + sets + " WHERE id = $" + (patch.length + 1), [...values, id]);
     }
     await activity(req.user.id, "Meeting Edited", "meetings", id);
     const row = await db.one("SELECT * FROM meetings WHERE id = $1", [id]);
@@ -915,8 +1003,7 @@ router.patch("/meetings/:id", requirePerm("meetings", "edit"), async (req, res, 
 router.delete("/meetings/:id", requirePerm("meetings", "delete"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const row = await db.one("SELECT * FROM meetings WHERE id = $1", [id]);
-    if (!row) throw new HttpError(404, "Meeting not found");
+    const row = await ensureMeetingScope(req, id);
     await db.query("DELETE FROM meetings WHERE id = $1", [id]);
     await activity(req.user.id, "Meeting Deleted", "meetings", id, { title: row.title });
     res.json({ ok: true });

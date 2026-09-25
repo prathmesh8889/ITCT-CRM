@@ -9,8 +9,9 @@ const path = require("path");
 const crypto = require("crypto");
 const { db } = require("../db");
 const { config, HttpError, money, computeTotals, nextCode } = require("../core");
-const { requirePerm, ensureQuotation, ensureInvoice } = require("../security");
+const { requirePerm, ensureCustomer, ensureQuotation, ensureInvoice } = require("../security");
 const { runTriggers } = require("../engines");
+const { scopedUserIds } = require("../workforce-scope");
 
 const router = express.Router();
 const ALLOWED_EXT = [".pdf", ".docx", ".xlsx", ".png", ".jpg", ".jpeg"];
@@ -32,6 +33,7 @@ const activity = (userId, action, module, recordId = null, meta = null) =>
 const audit = (user, action, target, detail = "") =>
   db.query("INSERT INTO audit_logs (user_id, user_name, action, target, detail) VALUES ($1,$2,$3,$4,$5)",
     [user.id, user.name, action, target, detail]);
+
 
 const cleanItems = (items) => (items || []).map((i) => ({
   product_id: i.product_id ?? null, description: String(i.description || ""),
@@ -128,10 +130,10 @@ router.delete("/products/:id", requirePerm("products", "delete"), async (req, re
 // ================= QUOTATIONS =================
 router.get("/quotations", requirePerm("quotations", "view"), async (req, res, next) => {
   try {
-    const wide = ["Super Admin", "Admin", "Sales Manager"].includes(req.role.name);
-    const rows = wide
+    const ids = await scopedUserIds(req);
+    const rows = ids === null
       ? await db.all("SELECT * FROM quotations ORDER BY created_at DESC")
-      : await db.all("SELECT * FROM quotations WHERE created_by = $1 ORDER BY created_at DESC", [req.user.id]);
+      : await db.all("SELECT * FROM quotations WHERE created_by = ANY($1::int[]) ORDER BY created_at DESC", [ids]);
     const items = rows.map(quoteOut);
     res.json({ items, total: items.length, page: 1, page_size: items.length });
   } catch (e) { next(e); }
@@ -145,6 +147,7 @@ router.post("/quotations", requirePerm("quotations", "create"), async (req, res,
   try {
     const b = req.body || {};
     if (!b.customer_id) throw new HttpError(422, "customer_id is required");
+    await ensureCustomer(req, Number(b.customer_id));
     const items = cleanItems(b.items);
     if (!items.length) throw new HttpError(422, "At least one line item is required");
     const totals = computeTotals(items);
@@ -167,7 +170,10 @@ router.patch("/quotations/:id", requirePerm("quotations", "edit"), async (req, r
   try {
     const q = await ensureQuotation(req, Number(req.params.id));
     const b = req.body || {};
-    if (b.customer_id) await db.query("UPDATE quotations SET customer_id = $1 WHERE id = $2", [b.customer_id, q.id]);
+    if (b.customer_id) {
+      await ensureCustomer(req, Number(b.customer_id));
+      await db.query("UPDATE quotations SET customer_id = $1 WHERE id = $2", [b.customer_id, q.id]);
+    }
     if (b.date) await db.query("UPDATE quotations SET date = $1 WHERE id = $2", [b.date, q.id]);
     if (b.valid_until) await db.query("UPDATE quotations SET valid_until = $1 WHERE id = $2", [b.valid_until, q.id]);
     if (b.terms !== undefined) await db.query("UPDATE quotations SET terms = $1 WHERE id = $2", [b.terms, q.id]);
@@ -221,10 +227,10 @@ router.post("/quotations/:id/convert-to-invoice", requirePerm("invoices", "creat
 // ================= INVOICES & PAYMENTS =================
 router.get("/invoices", requirePerm("invoices", "view"), async (req, res, next) => {
   try {
-    const wide = ["Super Admin", "Admin", "Sales Manager", "Accountant"].includes(req.role.name);
-    const rows = wide
+    const ids = await scopedUserIds(req);
+    const rows = ids === null
       ? await db.all("SELECT * FROM invoices ORDER BY created_at DESC")
-      : await db.all("SELECT * FROM invoices WHERE created_by = $1 ORDER BY created_at DESC", [req.user.id]);
+      : await db.all("SELECT * FROM invoices WHERE created_by = ANY($1::int[]) ORDER BY created_at DESC", [ids]);
     const items = rows.map(invOut);
     res.json({ items, total: items.length, page: 1, page_size: items.length });
   } catch (e) { next(e); }
@@ -238,6 +244,7 @@ router.post("/invoices", requirePerm("invoices", "create"), async (req, res, nex
   try {
     const b = req.body || {};
     if (!b.customer_id) throw new HttpError(422, "customer_id is required");
+    await ensureCustomer(req, Number(b.customer_id));
     const items = cleanItems(b.items);
     if (!items.length) throw new HttpError(422, "At least one line item is required");
     if (b.due_date && b.invoice_date && b.due_date < b.invoice_date) throw new HttpError(422, "due_date cannot be before invoice_date");
@@ -259,7 +266,10 @@ router.patch("/invoices/:id", requirePerm("invoices", "edit"), async (req, res, 
   try {
     const inv = await ensureInvoice(req, Number(req.params.id));
     const b = req.body || {};
-    if (b.customer_id) await db.query("UPDATE invoices SET customer_id = $1 WHERE id = $2", [b.customer_id, inv.id]);
+    if (b.customer_id) {
+      await ensureCustomer(req, Number(b.customer_id));
+      await db.query("UPDATE invoices SET customer_id = $1 WHERE id = $2", [b.customer_id, inv.id]);
+    }
     if (b.invoice_date) await db.query("UPDATE invoices SET invoice_date = $1 WHERE id = $2", [b.invoice_date, inv.id]);
     if (b.due_date) await db.query("UPDATE invoices SET due_date = $1 WHERE id = $2", [b.due_date, inv.id]);
     if (b.notes !== undefined) await db.query("UPDATE invoices SET notes = $1 WHERE id = $2", [b.notes, inv.id]);
@@ -267,13 +277,30 @@ router.patch("/invoices/:id", requirePerm("invoices", "edit"), async (req, res, 
       await db.query("UPDATE invoices SET status = $1 WHERE id = $2", [b.status, inv.id]);
     if (b.items) {
       const items = cleanItems(b.items);
+      if (!items.length) throw new HttpError(422, "At least one line item is required");
       const totals = computeTotals(items);
+      const alreadyPaid = Number((await db.one("SELECT COALESCE(SUM(amount),0)::float AS n FROM payments WHERE invoice_id=$1", [inv.id]))?.n || 0);
+      if (totals.grand_total + 0.01 < alreadyPaid)
+        throw new HttpError(422, `Invoice total cannot be lower than payments already recorded (${alreadyPaid})`);
       await db.query(`UPDATE invoices SET items = $1, subtotal = $2, discount_total = $3, tax_total = $4, grand_total = $5 WHERE id = $6`,
         [JSON.stringify(items), totals.subtotal, totals.discount_total, totals.tax_total, totals.grand_total, inv.id]);
     }
     const fresh = await recalcInvoice(inv.id); // paid / balance / status recomputed server-side
     await audit(req.user, "Invoice Changed", inv.invoice_number, `Total ${fresh.grand_total}`);
     res.json(invOut(fresh));
+  } catch (e) { next(e); }
+});
+
+router.delete("/invoices/:id", requirePerm("invoices", "delete"), async (req, res, next) => {
+  try {
+    const inv = await ensureInvoice(req, Number(req.params.id));
+    const payments = await db.one("SELECT COUNT(*)::int AS n FROM payments WHERE invoice_id=$1", [inv.id]);
+    if (Number(payments?.n || 0) > 0) throw new HttpError(409, "Invoice has payments and cannot be deleted. Reverse/remove the payments first.");
+    if (!["Draft", "Cancelled"].includes(inv.status))
+      throw new HttpError(409, "Only Draft or Cancelled invoices without payments can be deleted");
+    await db.query("DELETE FROM invoices WHERE id=$1", [inv.id]);
+    await audit(req.user, "Invoice Deleted", inv.invoice_number, inv.status);
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
@@ -301,18 +328,69 @@ router.post("/invoices/:id/payments", requirePerm("payments", "create"), async (
   } catch (e) { next(e); }
 });
 
-router.get("/payments", requirePerm("payments", "view"), async (_req, res, next) => {
+router.get("/payments", requirePerm("payments", "view"), async (req, res, next) => {
   try {
-    const rows = await db.all("SELECT * FROM payments ORDER BY payment_date DESC");
+    const ids = await scopedUserIds(req);
+    const rows = ids === null
+      ? await db.all("SELECT * FROM payments ORDER BY payment_date DESC")
+      : await db.all(`SELECT p.* FROM payments p
+                         JOIN invoices i ON i.id=p.invoice_id
+                        WHERE i.created_by=ANY($1::int[]) OR p.recorded_by=ANY($1::int[])
+                        ORDER BY p.payment_date DESC`, [ids]);
     const items = rows.map((p) => ({ ...p, amount: num(p.amount), payment_date: dstr(p.payment_date) }));
     res.json({ items, total: items.length, page: 1, page_size: items.length });
   } catch (e) { next(e); }
 });
 
-// ================= EXPENSES =================
-router.get("/expenses", requirePerm("expenses", "view"), async (_req, res, next) => {
+router.patch("/payments/:id", requirePerm("payments", "edit"), async (req, res, next) => {
   try {
-    const rows = await db.all("SELECT * FROM expenses ORDER BY date DESC");
+    const id = Number(req.params.id);
+    const payment = await db.one("SELECT * FROM payments WHERE id=$1", [id]);
+    if (!payment) throw new HttpError(404, "Payment not found");
+    await ensureInvoice(req, Number(payment.invoice_id));
+
+    const b = req.body || {};
+    const nextAmount = b.amount !== undefined ? Number(b.amount) : Number(payment.amount);
+    if (!nextAmount || nextAmount <= 0) throw new HttpError(422, "Payment amount must be positive");
+    const inv = await db.one("SELECT * FROM invoices WHERE id=$1", [payment.invoice_id]);
+    const otherPaid = Number((await db.one("SELECT COALESCE(SUM(amount),0)::float AS n FROM payments WHERE invoice_id=$1 AND id<>$2", [payment.invoice_id, id]))?.n || 0);
+    if (otherPaid + nextAmount > Number(inv.grand_total) + 0.01)
+      throw new HttpError(422, "Payment total cannot exceed the invoice total");
+
+    const allowed = ["amount","payment_date","payment_method","transaction_reference","notes"];
+    const patch = Object.entries(b).filter(([k,v]) => allowed.includes(k) && v !== undefined);
+    if (patch.length) {
+      const values = patch.map(([k,v]) => k === "amount" ? money(Number(v)) : v);
+      const sets = patch.map(([k],i) => `${k}=${i+1}`).join(",");
+      await db.query(`UPDATE payments SET ${sets} WHERE id=${patch.length+1}`, [...values, id]);
+    }
+    const freshInvoice = await recalcInvoice(payment.invoice_id);
+    const row = await db.one("SELECT * FROM payments WHERE id=$1", [id]);
+    await audit(req.user, "Payment Updated", payment.payment_number, `Invoice ${inv.invoice_number}`);
+    res.json({ payment: { ...row, amount: num(row.amount), payment_date: dstr(row.payment_date) }, invoice: invOut(freshInvoice) });
+  } catch (e) { next(e); }
+});
+
+router.delete("/payments/:id", requirePerm("payments", "delete"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const payment = await db.one("SELECT * FROM payments WHERE id=$1", [id]);
+    if (!payment) throw new HttpError(404, "Payment not found");
+    const inv = await ensureInvoice(req, Number(payment.invoice_id));
+    await db.query("DELETE FROM payments WHERE id=$1", [id]);
+    const freshInvoice = await recalcInvoice(payment.invoice_id);
+    await audit(req.user, "Payment Deleted", payment.payment_number, `Invoice ${inv.invoice_number}; amount ${num(payment.amount)}`);
+    res.json({ ok: true, invoice: invOut(freshInvoice) });
+  } catch (e) { next(e); }
+});
+
+// ================= EXPENSES =================
+router.get("/expenses", requirePerm("expenses", "view"), async (req, res, next) => {
+  try {
+    const ids = await scopedUserIds(req);
+    const rows = ids === null
+      ? await db.all("SELECT * FROM expenses ORDER BY date DESC")
+      : await db.all("SELECT * FROM expenses WHERE employee_id=ANY($1::int[]) ORDER BY date DESC", [ids]);
     const items = rows.map((e) => ({ ...e, amount: num(e.amount), date: dstr(e.date) }));
     res.json({ items, total: items.length, page: 1, page_size: items.length });
   } catch (e) { next(e); }
@@ -332,11 +410,37 @@ router.post("/expenses", requirePerm("expenses", "create"), async (req, res, nex
   } catch (e) { next(e); }
 });
 
+router.patch("/expenses/:id", requirePerm("expenses", "edit"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const row = await db.one("SELECT * FROM expenses WHERE id=$1", [id]);
+    if (!row) throw new HttpError(404, "Expense not found");
+    const ids = await scopedUserIds(req);
+    if (ids !== null && !ids.includes(Number(row.employee_id)))
+      throw new HttpError(403, "This expense is outside your Workforce OS scope");
+    const b = req.body || {};
+    if (b.amount !== undefined && Number(b.amount) <= 0) throw new HttpError(422, "Expense amount must be positive");
+    const allowed = ["category","description","amount","date","payment_method","notes"];
+    const patch = Object.entries(b).filter(([k,v]) => allowed.includes(k) && v !== undefined);
+    if (patch.length) {
+      const values = patch.map(([k,v]) => k === "amount" ? money(Number(v)) : v);
+      const sets = patch.map(([k],i) => `${k}=${i+1}`).join(",");
+      await db.query(`UPDATE expenses SET ${sets} WHERE id=${patch.length+1}`, [...values, id]);
+    }
+    const fresh = await db.one("SELECT * FROM expenses WHERE id=$1", [id]);
+    await audit(req.user, "Expense Updated", `expense:${id}`, fresh.description || "");
+    res.json({ ...fresh, amount: num(fresh.amount), date: dstr(fresh.date) });
+  } catch (e) { next(e); }
+});
+
 router.delete("/expenses/:id", requirePerm("expenses", "delete"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const row = await db.one("SELECT * FROM expenses WHERE id = $1", [id]);
     if (!row) throw new HttpError(404, "Expense not found");
+    const ids = await scopedUserIds(req);
+    if (ids !== null && !ids.includes(Number(row.employee_id)))
+      throw new HttpError(403, "This expense is outside your Workforce OS scope");
     await db.query("DELETE FROM expenses WHERE id = $1", [id]);
     await audit(req.user, "Expense Deleted", `expense:${id}`, row.description || "");
     res.json({ ok: true });

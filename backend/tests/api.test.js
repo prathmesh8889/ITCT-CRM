@@ -236,3 +236,44 @@ test("Sales Manager can assign leads and targets", () => {
   assert.ok(manager.targets.includes("create"));
   assert.ok(manager.leads.includes("assign"));
 });
+
+
+test("core CRUD route modules load after full CRM audit", () => {
+  assert.doesNotThrow(() => require("../src/routes/crm"));
+  assert.doesNotThrow(() => require("../src/routes/billing"));
+  assert.doesNotThrow(() => require("../src/routes/workforce-teams"));
+});
+
+test("task and meeting update SQL use PostgreSQL placeholders", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const src = fs.readFileSync(path.join(__dirname, "../src/routes/crm.js"), "utf8");
+  assert.ok(src.includes('patch.map(([k], i) => k + " = $" + (i + 1))'));
+  assert.ok(src.includes('"UPDATE tasks SET " + sets + " WHERE id = $" + (patch.length + 1)'));
+  assert.ok(src.includes('"UPDATE meetings SET " + sets + " WHERE id = $" + (patch.length + 1)'));
+  assert.doesNotMatch(src, /UPDATE tasks SET \$\{sets\} WHERE id = \$\{patch\.length \+ 1\}/);
+  assert.doesNotMatch(src, /UPDATE meetings SET \$\{sets\} WHERE id = \$\{patch\.length \+ 1\}/);
+});
+
+test("sales lead scope query uses PostgreSQL array placeholders", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const src = fs.readFileSync(path.join(__dirname, "../src/routes/scoped-crm.js"), "utf8");
+  assert.ok(src.includes('"assigned_user_id = ANY($" + params.length + "::int[])"'));
+  assert.ok(src.includes('"(assigned_user_id = ANY($" + params.length + "::int[]) OR assigned_user_id IS NULL)"'));
+});
+
+test("CRUD audit exposes safe delete endpoints for relationship and workflow records", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const crm = fs.readFileSync(path.join(__dirname, "../src/routes/crm.js"), "utf8");
+  const billing = fs.readFileSync(path.join(__dirname, "../src/routes/billing.js"), "utf8");
+  const teams = fs.readFileSync(path.join(__dirname, "../src/routes/workforce-teams.js"), "utf8");
+  for (const route of ["/companies/:id", "/contacts/:id", "/followups/:id", "/tasks/:id", "/meetings/:id"]) {
+    assert.ok(crm.includes(`router.delete("${route}"`), `missing DELETE ${route}`);
+  }
+  for (const route of ["/products/:id", "/quotations/:id", "/invoices/:id", "/payments/:id", "/expenses/:id"]) {
+    assert.ok(billing.includes(`router.delete("${route}"`), `missing DELETE ${route}`);
+  }
+  assert.ok(teams.includes('router.delete("/teams/:id"'), "missing DELETE /teams/:id");
+});

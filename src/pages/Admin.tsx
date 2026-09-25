@@ -23,6 +23,9 @@ function UserModal({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const save = async () => {
     if (!f.name.trim() || !f.email.trim()) { toast("Name and email required", "err"); return; }
+    if (f.password.length < 12 || !/[a-z]/.test(f.password) || !/[A-Z]/.test(f.password) || !/\d/.test(f.password) || !/[^A-Za-z0-9]/.test(f.password)) {
+      toast("Temporary password must be 12+ characters with uppercase, lowercase, number and symbol", "err"); return;
+    }
     if (d.users.some((u) => u.email.toLowerCase() === f.email.toLowerCase())) { toast("Email already exists", "err"); return; }
     const roleName = d.roles.find((r) => r.id === f.roleId)?.name || "";
     const isSales = roleName === "Sales Executive";
@@ -113,7 +116,7 @@ export function EmployeesPage() {
               <td className="td"><span className="flex items-center gap-2.5"><Avatar name={u.name} color={u.color} size={30} /><span><span className="block font-semibold text-ink-900 dark:text-ink-50">{u.name}</span><span className="num block text-[11px] text-ink-400">{u.email}</span></span></span></td>
               <td className="td">
                 {can("employees", "edit") && u.id !== user!.id ? (
-                  <Select className="!w-auto" value={u.roleId} onChange={(e) => { const newRole = e.target.value; const isSales = d.roles.find((r) => r.id === newRole)?.name === "Sales Executive"; void syncUserUpdate(u.id, { roleId: newRole, isSales }).catch((err) => toast(err instanceof Error ? err.message : "Server update failed", "err")); mutate((db) => { const x = db.users.find((y) => y.id === u.id); if (x) { x.roleId = newRole; x.isSales = isSales; } }); logAudit(user!.id, "Role Changed", `user:${u.email}`, `→ ${d.roles.find((r) => r.id === newRole)?.name}`); toast("Role updated"); }}>
+                  <Select className="!w-auto" value={u.roleId} onChange={(e) => { const newRole = e.target.value; const isSales = d.roles.find((r) => r.id === newRole)?.name === "Sales Executive"; void (async () => { try { await syncUserUpdate(u.id, { roleId: newRole, isSales }); mutate((db) => { const x = db.users.find((y) => y.id === u.id); if (x) { x.roleId = newRole; x.isSales = isSales; } }); logAudit(user!.id, "Role Changed", `user:${u.email}`, `→ ${d.roles.find((r) => r.id === newRole)?.name}`); toast("Role updated", "ok"); } catch (err) { toast(err instanceof Error ? err.message : "Server update failed", "err"); } })(); }}>
                     {d.roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                   </Select>
                 ) : <Badge tone="violet">{d.roles.find((r) => r.id === u.roleId)?.name}</Badge>}
@@ -121,7 +124,7 @@ export function EmployeesPage() {
               <td className="td text-[12.5px]">{d.teams.find((t) => t.id === u.teamId)?.name || "—"}</td>
               <td className="td num">{d.leads.filter((l) => l.assigneeId === u.id && !["Converted", "Lost"].includes(l.status)).length}</td>
               <td className="td num text-[11.5px] text-ink-400">{u.lastLogin ? fmtDT(u.lastLogin) : "never"}</td>
-              <td className="td">{can("employees", "edit") && u.id !== user!.id ? <Toggle on={u.active} onChange={(v) => { void syncUserUpdate(u.id, { active: v }).catch((err) => toast(err instanceof Error ? err.message : "Server update failed", "err")); mutate((db) => { const x = db.users.find((y) => y.id === u.id); if (x) x.active = v; }); logAudit(user!.id, v ? "User Enabled" : "User Disabled", `user:${u.email}`, ""); toast(v ? "User enabled" : "User disabled", v ? "ok" : "warn"); }} /> : <Badge tone={u.active ? "green" : "red"}>{u.active ? "Yes" : "No"}</Badge>}</td>
+              <td className="td">{can("employees", "edit") && u.id !== user!.id ? <Toggle on={u.active} onChange={(v) => { void (async () => { try { await syncUserUpdate(u.id, { active: v }); mutate((db) => { const x = db.users.find((y) => y.id === u.id); if (x) x.active = v; }); logAudit(user!.id, v ? "User Enabled" : "User Disabled", `user:${u.email}`, ""); toast(v ? "User enabled" : "User disabled", v ? "ok" : "warn"); } catch (err) { toast(err instanceof Error ? err.message : "Server update failed", "err"); } })(); }} /> : <Badge tone={u.active ? "green" : "red"}>{u.active ? "Yes" : "No"}</Badge>}</td>
             </tr>
           ))}</tbody>
         </table></div></div>
@@ -277,7 +280,7 @@ export function AutomationPage() {
       <div className="space-y-2">
         {d.rules.map((r) => (
           <div key={r.id} className={`card flex flex-wrap items-center gap-3 p-3.5 transition-all hover:shadow-md ${r.enabled ? "" : "opacity-55"}`}>
-            <Toggle on={r.enabled} onChange={(v) => { void syncRuleToggle(r.id, v).catch((err) => toast(err instanceof Error ? err.message : "Server update failed", "err")); mutate((db) => { const x = db.rules.find((y) => y.id === r.id); if (x) x.enabled = v; }); toast(v ? "Rule enabled" : "Rule disabled", v ? "ok" : "warn"); }} />
+            <Toggle on={r.enabled} onChange={(v) => { void (async () => { try { await syncRuleToggle(r.id, v); mutate((db) => { const x = db.rules.find((y) => y.id === r.id); if (x) x.enabled = v; }); toast(v ? "Rule enabled" : "Rule disabled", v ? "ok" : "warn"); } catch (err) { toast(err instanceof Error ? err.message : "Server update failed", "err"); } })(); }} />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2"><span className="text-[13.5px] font-semibold text-ink-800 dark:text-ink-100">{r.name}</span><Badge tone="blue">{TRIGGERS.find((t) => t.k === r.trigger)?.label}</Badge>
                 {r.condField && <Badge tone="slate">if {r.condField} {r.condOp} {r.condValue}</Badge>}</div>
@@ -285,7 +288,7 @@ export function AutomationPage() {
             </div>
             <span className="num text-[10.5px] text-ink-400">{d.ruleRuns.filter((x) => x.ruleId === r.id).length} runs</span>
             {can("automation", "edit") && <button className="rounded p-1 text-ink-400 hover:text-brand-600" onClick={() => { setEditId(r.id); setF({ ...r, actions: r.actions.map((a) => ({ ...a })) }); setModal(true); }}><Pencil size={13} /></button>}
-            {can("automation", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => { if (window.confirm(`Delete rule "${r.name}"?`)) { void syncRuleDelete(r.id).catch((err) => toast(err instanceof Error ? err.message : "Server delete failed", "err")); mutate((db) => { db.rules = db.rules.filter((x) => x.id !== r.id); }); toast("Rule deleted", "warn"); } }}><Trash2 size={13} /></button>}
+            {can("automation", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => { if (window.confirm(`Delete rule "${r.name}"?`)) void (async () => { try { await syncRuleDelete(r.id); mutate((db) => { db.rules = db.rules.filter((x) => x.id !== r.id); }); toast("Rule deleted", "warn"); } catch (err) { toast(err instanceof Error ? err.message : "Server delete failed", "err"); } })(); }}><Trash2 size={13} /></button>}
           </div>
         ))}
         {d.rules.length === 0 && <EmptyState icon={<Zap size={24} />} title="No automation rules" />}

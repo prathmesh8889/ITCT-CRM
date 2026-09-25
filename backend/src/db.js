@@ -128,8 +128,10 @@ CREATE TABLE IF NOT EXISTS contacts (
   id SERIAL PRIMARY KEY, first_name TEXT NOT NULL, last_name TEXT DEFAULT '',
   company_id INT REFERENCES companies(id), designation TEXT DEFAULT '',
   email TEXT DEFAULT '', phone TEXT DEFAULT '', whatsapp TEXT DEFAULT '',
-  address TEXT DEFAULT '', city TEXT DEFAULT '', notes TEXT DEFAULT '', created_at TIMESTAMPTZ DEFAULT now()
+  address TEXT DEFAULT '', city TEXT DEFAULT '', notes TEXT DEFAULT '',
+  created_by INT REFERENCES users(id), created_at TIMESTAMPTZ DEFAULT now()
 );
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id);
 CREATE TABLE IF NOT EXISTS deal_stages (
   id SERIAL PRIMARY KEY, key TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
   "order" INT NOT NULL, kind TEXT DEFAULT 'open'

@@ -4,7 +4,7 @@ import { Plus, Printer, Receipt, Wallet, TrendingDown, MessageCircle, Send, Penc
 import { useStore } from "../store";
 import { mutate, useDB } from "../lib/db";
 import { docTotals, paidFor, logAct, waLink, renderTemplate, toCSV, downloadFile, fmtD, todayISO, addDaysISO, inr } from "../lib/services";
-import { invoiceApi, expenseApi } from "../lib/api";
+import { invoiceApi, paymentApi, expenseApi } from "../lib/api";
 import { fromApiInvoice, fromApiPayment, toApiItems } from "../lib/mappers";
 import type { Invoice, Payment, PayMode, DocItem } from "../lib/types";
 import { Btn, Badge, Modal, Drawer, Field, Input, Select, Textarea, Tabs, EmptyState, Money, statusTone, Menu, MenuItem } from "../components/ui";
@@ -58,18 +58,19 @@ function InvoiceModal({ initial, onDone, editing }: { initial: Partial<Invoice>;
   );
 }
 
-function PaymentModal({ invoiceId, onDone }: { invoiceId?: string; onDone: () => void }) {
+function PaymentModal({ invoiceId, payment, onDone }: { invoiceId?: string; payment?: Payment | null; onDone: () => void }) {
   const { user, toast } = useStore();
   const d = useDB();
-  const [invId, setInvId] = useState(invoiceId || "");
+  const [invId, setInvId] = useState(payment?.invoiceId || invoiceId || "");
   const inv = d.invoices.find((i) => i.id === invId);
-  const balance = inv ? Math.max(0, docTotals(inv.items, inv.discountPct).total - paidFor(d, inv.id)) : 0;
-  const [amount, setAmount] = useState<number>(0);
-  const [date, setDate] = useState(todayISO());
-  const [mode, setMode] = useState<PayMode>("UPI");
-  const [txn, setTxn] = useState("");
-  const [notes, setNotes] = useState("");
-  const [init, setInit] = useState(false);
+  const otherPaid = inv ? d.payments.filter((p) => p.invoiceId === inv.id && p.id !== payment?.id).reduce((a, p) => a + p.amount, 0) : 0;
+  const balance = inv ? Math.max(0, docTotals(inv.items, inv.discountPct).total - otherPaid) : 0;
+  const [amount, setAmount] = useState<number>(payment?.amount || 0);
+  const [date, setDate] = useState(payment?.date || todayISO());
+  const [mode, setMode] = useState<PayMode>(payment?.mode || "UPI");
+  const [txn, setTxn] = useState(payment?.txnId || "");
+  const [notes, setNotes] = useState(payment?.notes || "");
+  const [init, setInit] = useState(!!payment);
   const [busy, setBusy] = useState(false);
   if (inv && !init) { setInit(true); setAmount(balance); }
   const save = async () => {
@@ -77,26 +78,32 @@ function PaymentModal({ invoiceId, onDone }: { invoiceId?: string; onDone: () =>
     if (!amount || amount <= 0) { toast("Enter a valid amount", "err"); return; }
     setBusy(true);
     try {
-      const r = await invoiceApi.recordPayment(Number(inv.id), {
-        amount, payment_date: date, payment_method: mode, transaction_reference: txn, notes,
-      });
+      const r = payment
+        ? await paymentApi.update(Number(payment.id), {
+            amount, payment_date: date, payment_method: mode, transaction_reference: txn, notes,
+          })
+        : await invoiceApi.recordPayment(Number(inv.id), {
+            amount, payment_date: date, payment_method: mode, transaction_reference: txn, notes,
+          });
       const payload: any = r.data;
-      const payment = fromApiPayment(payload.payment);
+      const savedPayment = fromApiPayment(payload.payment);
       const freshInvoice = { ...fromApiInvoice(payload.invoice), discountPct: inv.discountPct };
       mutate((db) => {
-        db.payments.unshift({ ...payment, recordedBy: user!.id });
+        const pIndex = db.payments.findIndex((p) => p.id === savedPayment.id);
+        const row = { ...savedPayment, recordedBy: payment?.recordedBy || user!.id };
+        if (pIndex >= 0) db.payments[pIndex] = row; else db.payments.unshift(row);
         const index = db.invoices.findIndex((x) => x.id === freshInvoice.id);
         if (index >= 0) db.invoices[index] = freshInvoice;
       });
-      toast("Payment recorded", "ok", `${inr(amount)} · ${mode}`);
+      toast(payment ? "Payment updated" : "Payment recorded", "ok", `${inr(amount)} · ${mode}`);
       onDone();
-    } catch (e) { toast(e instanceof Error ? e.message : "Could not record payment", "err"); }
+    } catch (e) { toast(e instanceof Error ? e.message : payment ? "Could not update payment" : "Could not record payment", "err"); }
     finally { setBusy(false); }
   };
   return (
     <div className="grid grid-cols-2 gap-3">
       <Field label="Invoice" req className="col-span-2">
-        <Select value={invId} onChange={(e) => { setInvId(e.target.value); setInit(false); }} disabled={!!invoiceId}>
+        <Select value={invId} onChange={(e) => { setInvId(e.target.value); setInit(false); }} disabled={!!invoiceId || !!payment}>
           <option value="">Select…</option>
           {d.invoices.filter((i) => i.status !== "Cancelled" && i.status !== "Paid").map((i) => <option key={i.id} value={i.id}>{i.number} · {d.customers.find((c) => c.id === i.customerId)?.company} · bal {inr(Math.max(0, docTotals(i.items, i.discountPct).total - paidFor(d, i.id)))}</option>)}
         </Select>
@@ -107,7 +114,7 @@ function PaymentModal({ invoiceId, onDone }: { invoiceId?: string; onDone: () =>
       <Field label="Transaction ID"><Input value={txn} onChange={(e) => setTxn(e.target.value)} placeholder="UPI-12345 / NEFT…" /></Field>
       <Field label="Notes" className="col-span-2"><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
       {inv && <div className="num col-span-2 rounded-md bg-ink-50 px-3 py-2 text-[12px] text-ink-500 dark:bg-ink-800/60">Invoice total {inr(docTotals(inv.items, inv.discountPct).total)} · paid {inr(paidFor(d, inv.id))} · balance {inr(balance)}</div>}
-      <div className="col-span-2 flex justify-end gap-2"><Btn variant="ghost" onClick={onDone}>Cancel</Btn><Btn loading={busy} onClick={() => void save()}><Wallet size={14} /> Record payment</Btn></div>
+      <div className="col-span-2 flex justify-end gap-2"><Btn variant="ghost" onClick={onDone}>Cancel</Btn><Btn loading={busy} onClick={() => void save()}><Wallet size={14} /> {payment ? "Save payment" : "Record payment"}</Btn></div>
     </div>
   );
 }
@@ -121,8 +128,10 @@ export default function Invoices() {
   const [modal, setModal] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [payForId, setPayForId] = useState<string | null | "any">(null);
+  const [editPayment, setEditPayment] = useState<Payment | null>(null);
   const [openId, setOpenId] = useState<string | null>(params.get("open"));
   const [expModal, setExpModal] = useState(false);
+  const [expEditId, setExpEditId] = useState<string | null>(null);
   const [exp, setExp] = useState({ category: "Software", vendor: "", amount: 0, date: todayISO(), notes: "" });
   const today = todayISO();
   useEffect(() => { setOpenId(params.get("open")); }, [params]);
@@ -157,14 +166,26 @@ export default function Invoices() {
     if (!exp.vendor.trim() || !exp.amount) { toast("Vendor and amount required", "err"); return; }
     setExpenseBusy(true);
     try {
-      const r = await expenseApi.create({
-        category: exp.category, description: exp.vendor.trim(), amount: exp.amount, date: exp.date,
-        payment_method: "UPI", notes: exp.notes,
+      const r = expEditId
+        ? await expenseApi.update(Number(expEditId), {
+            category: exp.category, description: exp.vendor.trim(), amount: exp.amount, date: exp.date,
+            payment_method: "UPI", notes: exp.notes,
+          })
+        : await expenseApi.create({
+            category: exp.category, description: exp.vendor.trim(), amount: exp.amount, date: exp.date,
+            payment_method: "UPI", notes: exp.notes,
+          });
+      const raw: any = r.data;
+      const row = {
+        id: String(raw.id), category: raw.category || exp.category, vendor: raw.description || exp.vendor,
+        amount: Number(raw.amount ?? exp.amount), date: raw.date || exp.date, notes: raw.notes || exp.notes,
+        recordedBy: String(raw.employee_id || user!.id), createdAt: raw.created_at || new Date().toISOString(),
+      };
+      mutate((db) => {
+        const index = db.expenses.findIndex((x) => x.id === row.id);
+        if (index >= 0) db.expenses[index] = row; else db.expenses.unshift(row);
       });
-      mutate((db) => db.expenses.unshift({
-        id: String((r.data as any).id), ...exp, recordedBy: user!.id, createdAt: new Date().toISOString(),
-      }));
-      toast("Expense added", "ok"); setExpModal(false);
+      toast(expEditId ? "Expense updated" : "Expense added", "ok"); setExpModal(false); setExpEditId(null);
       setExp({ category: "Software", vendor: "", amount: 0, date: todayISO(), notes: "" });
     } catch (e) { toast(e instanceof Error ? e.message : "Could not add expense", "err"); }
     finally { setExpenseBusy(false); }
@@ -185,13 +206,44 @@ export default function Invoices() {
       toast("Invoice cancelled", "warn");
     } catch (e) { toast(e instanceof Error ? e.message : "Could not cancel invoice", "err"); }
   };
+  const removeInvoice = async (inv: Invoice) => {
+    if (!window.confirm(`Delete invoice ${inv.number}? This is allowed only for a Draft/Cancelled invoice with no payments.`)) return;
+    try {
+      await invoiceApi.remove(Number(inv.id));
+      mutate((db) => { db.invoices = db.invoices.filter((x) => x.id !== inv.id); });
+      if (openId === inv.id) { setOpenId(null); setParams({ tab: "invoices" }); }
+      toast("Invoice deleted", "warn");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not delete invoice", "err"); }
+  };
+  const removePayment = async (payment: Payment) => {
+    if (!window.confirm(`Delete payment ${inr(payment.amount)}? The invoice balance will be recalculated.`)) return;
+    try {
+      const r = await paymentApi.remove(Number(payment.id));
+      const payload: any = r.data;
+      mutate((db) => {
+        db.payments = db.payments.filter((x) => x.id !== payment.id);
+        if (payload.invoice) {
+          const current = db.invoices.find((x) => x.id === String(payload.invoice.id));
+          const row = { ...fromApiInvoice(payload.invoice), discountPct: current?.discountPct || 0 };
+          const index = db.invoices.findIndex((x) => x.id === row.id);
+          if (index >= 0) db.invoices[index] = row;
+        }
+      });
+      toast("Payment deleted and invoice balance recalculated", "warn");
+    } catch (e) { toast(e instanceof Error ? e.message : "Could not delete payment", "err"); }
+  };
+  const openExpenseEdit = (x: (typeof d.expenses)[number]) => {
+    setExpEditId(x.id);
+    setExp({ category: x.category, vendor: x.vendor, amount: x.amount, date: x.date, notes: x.notes || "" });
+    setExpModal(true);
+  };
 
   return (
     <div className="mx-auto max-w-[1250px] p-4 md:p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div><h1 className="hd text-[22px]">Billing & Money</h1><p className="text-[12.5px] text-ink-500">Outstanding across invoices: <b className="num text-red-500">{inr(outstanding)}</b></p></div>
         <div className="flex gap-2">
-          {tab === "expenses" && can("expenses", "create") && <Btn size="sm" variant="outline" onClick={() => setExpModal(true)}><Plus size={14} /> Expense</Btn>}
+          {tab === "expenses" && can("expenses", "create") && <Btn size="sm" variant="outline" onClick={() => { setExpEditId(null); setExp({ category: "Software", vendor: "", amount: 0, date: todayISO(), notes: "" }); setExpModal(true); }}><Plus size={14} /> Expense</Btn>}
           {tab === "payments" && can("payments", "create") && <Btn size="sm" variant="outline" onClick={() => setPayForId("any")}><Plus size={14} /> Record payment</Btn>}
           {tab === "invoices" && can("invoices", "create") && <Btn size="sm" onClick={() => setModal(true)}><Plus size={14} /> New invoice</Btn>}
         </div>
@@ -223,6 +275,7 @@ export default function Invoices() {
                       {inv.status === "Draft" && can("invoices", "edit") && <MenuItem onClick={() => void markSent(inv)}><Send size={13} /> Mark sent</MenuItem>}
                       {inv.status === "Draft" && can("invoices", "edit") && <MenuItem onClick={() => setEditId(inv.id)}><Pencil size={13} /> Edit draft</MenuItem>}
                       {inv.status === "Draft" && can("invoices", "edit") && <MenuItem danger onClick={() => void cancelInvoice(inv)}><X size={13} /> Cancel invoice</MenuItem>}
+                      {can("invoices", "delete") && ["Draft", "Cancelled"].includes(inv.status) && d.payments.every((p) => p.invoiceId !== inv.id) && <MenuItem danger onClick={() => void removeInvoice(inv)}><X size={13} /> Delete invoice</MenuItem>}
                     </Menu>
                   </td>
                 </tr>
@@ -239,7 +292,7 @@ export default function Invoices() {
             <Btn variant="outline" size="sm" onClick={() => downloadFile(`payments-${today}.csv`, toCSV(["Date", "Invoice", "Customer", "Amount", "Mode", "Txn ID"], d.payments.map((p) => [p.date, d.invoices.find((i) => i.id === p.invoiceId)?.number || "", d.customers.find((c) => c.id === p.customerId)?.company || "", p.amount, p.mode, p.txnId])))}><Download size={13} /> Export CSV</Btn>
           </div>
           <div className="card overflow-hidden"><table className="w-full">
-            <thead className="border-b border-ink-200/70 bg-ink-50/70 dark:border-ink-700 dark:bg-ink-800/50"><tr><th className="th">Date</th><th className="th">Invoice</th><th className="th">Customer</th><th className="th">Mode</th><th className="th">Txn ID</th><th className="th text-right">Amount</th><th className="th">By</th></tr></thead>
+            <thead className="border-b border-ink-200/70 bg-ink-50/70 dark:border-ink-700 dark:bg-ink-800/50"><tr><th className="th">Date</th><th className="th">Invoice</th><th className="th">Customer</th><th className="th">Mode</th><th className="th">Txn ID</th><th className="th text-right">Amount</th><th className="th">By</th><th className="th text-right">Actions</th></tr></thead>
             <tbody>{[...d.payments].sort((a, b) => b.date.localeCompare(a.date)).map((p) => (
               <tr key={p.id} className="border-b border-ink-100/70 dark:border-ink-800">
                 <td className="td num text-[12px]">{fmtD(p.date)}</td>
@@ -249,6 +302,7 @@ export default function Invoices() {
                 <td className="td num text-[11.5px] text-ink-400">{p.txnId || "—"}</td>
                 <td className="td num text-right font-bold text-emerald-600">{inr(p.amount)}</td>
                 <td className="td text-[12px] text-ink-400">{d.users.find((u) => u.id === p.recordedBy)?.name.split(" ")[0]}</td>
+                <td className="td"><div className="flex justify-end gap-1">{can("payments", "edit") && <button className="rounded p-1 text-ink-400 hover:text-brand-600" onClick={() => setEditPayment(p)}><Pencil size={13} /></button>}{can("payments", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => void removePayment(p)}><X size={13} /></button>}</div></td>
               </tr>
             ))}</tbody>
           </table>
@@ -271,7 +325,7 @@ export default function Invoices() {
                 <td className="td font-medium">{x.vendor}</td>
                 <td className="td text-[12px] text-ink-400">{x.notes || "—"}</td>
                 <td className="td num text-right font-bold text-red-500">{inr(x.amount)}</td>
-                <td className="td">{can("expenses", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => void removeExpense(x.id)}><X size={13} /></button>}</td>
+                <td className="td"><div className="flex gap-1">{can("expenses", "edit") && <button className="rounded p-1 text-ink-400 hover:text-brand-600" onClick={() => openExpenseEdit(x)}><Pencil size={13} /></button>}{can("expenses", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => void removeExpense(x.id)}><X size={13} /></button>}</div></td>
               </tr>
             ))}</tbody>
           </table>
@@ -283,8 +337,9 @@ export default function Invoices() {
       {modal && <Modal open onClose={() => setModal(false)} title="New invoice" wide><InvoiceModal initial={{ date: todayISO(), dueDate: addDaysISO(15) }} onDone={() => setModal(false)} editing={false} /></Modal>}
       {editId && <Modal open onClose={() => setEditId(null)} title="Edit invoice draft" wide><InvoiceModal initial={{ ...d.invoices.find((x) => x.id === editId)! }} onDone={() => setEditId(null)} editing /></Modal>}
       {payForId && <Modal open onClose={() => setPayForId(null)} title="Record payment"><PaymentModal invoiceId={payForId === "any" ? undefined : payForId} onDone={() => setPayForId(null)} /></Modal>}
+      {editPayment && <Modal open onClose={() => setEditPayment(null)} title="Edit payment"><PaymentModal payment={editPayment} onDone={() => setEditPayment(null)} /></Modal>}
       {expModal && (
-        <Modal open onClose={() => setExpModal(false)} title="Add expense">
+        <Modal open onClose={() => { setExpModal(false); setExpEditId(null); }} title={expEditId ? "Edit expense" : "Add expense"}>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Category"><Select value={exp.category} onChange={(e) => setExp((p) => ({ ...p, category: e.target.value }))}>{["Office Rent", "Salaries", "Advertising", "Travel", "Software", "Utilities", "Misc"].map((c) => <option key={c}>{c}</option>)}</Select></Field>
             <Field label="Vendor" req><Input value={exp.vendor} onChange={(e) => setExp((p) => ({ ...p, vendor: e.target.value }))} /></Field>
@@ -292,7 +347,7 @@ export default function Invoices() {
             <Field label="Date"><Input type="date" value={exp.date} onChange={(e) => setExp((p) => ({ ...p, date: e.target.value }))} /></Field>
             <Field label="Notes" className="col-span-2"><Textarea value={exp.notes} onChange={(e) => setExp((p) => ({ ...p, notes: e.target.value }))} /></Field>
           </div>
-          <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => setExpModal(false)}>Cancel</Btn><Btn loading={expenseBusy} onClick={() => void saveExpense()}>Save expense</Btn></div>
+          <div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={() => { setExpModal(false); setExpEditId(null); }}>Cancel</Btn><Btn loading={expenseBusy} onClick={() => void saveExpense()}>{expEditId ? "Save changes" : "Save expense"}</Btn></div>
         </Modal>
       )}
       {open && (
@@ -313,7 +368,7 @@ export default function Invoices() {
             {d.payments.filter((p) => p.invoiceId === open.id).map((p) => (
               <div key={p.id} className="mb-2 flex items-center justify-between rounded-md border border-ink-100 p-2.5 dark:border-ink-800">
                 <span className="text-[12.5px]">{fmtD(p.date)} · {p.mode}{p.txnId ? ` · ${p.txnId}` : ""}</span>
-                <Money v={p.amount} className="font-bold text-emerald-600" />
+                <span className="flex items-center gap-1"><Money v={p.amount} className="font-bold text-emerald-600" />{can("payments", "edit") && <button className="rounded p-1 text-ink-400 hover:text-brand-600" onClick={() => setEditPayment(p)}><Pencil size={12} /></button>}{can("payments", "delete") && <button className="rounded p-1 text-ink-400 hover:text-red-500" onClick={() => void removePayment(p)}><X size={12} /></button>}</span>
               </div>
             ))}
             {d.payments.filter((p) => p.invoiceId === open.id).length === 0 && <p className="text-[12.5px] text-ink-400">No payments yet.</p>}
