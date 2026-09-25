@@ -57,7 +57,13 @@ type FormState = {
 };
 
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
-const tempPassword = () => `ITCT@${Math.random().toString(36).slice(2, 8)}${Math.floor(10 + Math.random() * 89)}`;
+const passwordPolicyError = (value: string) => {
+  if (value.length < 12) return "Password must be at least 12 characters";
+  if (!/[a-z]/.test(value) || !/[A-Z]/.test(value) || !/\d/.test(value) || !/[^A-Za-z0-9]/.test(value))
+    return "Password must include uppercase, lowercase, number and symbol";
+  return "";
+};
+const tempPassword = () => `Itct@${Math.random().toString(36).slice(2, 10)}9Z`;
 const levelCode = (value?: number | null) => value && value >= 1 && value <= 6 ? `L${value}` : "—";
 
 function EmployeeEditor({
@@ -114,7 +120,7 @@ function EmployeeEditor({
     const name = form.name.trim();
     const email = normalizeEmail(form.email);
     if (!name || !email) { toast("Name and email are required", "err"); return; }
-    if (!employee && form.password.length < 8) { toast("Temporary password must be at least 8 characters", "err"); return; }
+    if (!employee) { const pe = passwordPolicyError(form.password); if (pe) { toast(pe, "err"); return; } }
     if (!form.roleId) { toast("Select an approved Workforce OS role", "err"); return; }
 
     const role = roles.find((x) => String(x.id) === form.roleId);
@@ -204,7 +210,7 @@ function ResetPasswordModal({ employee, onClose }: { employee: BackendUser | nul
   const [busy, setBusy] = useState(false);
   if (!employee) return null;
   const reset = async () => {
-    if (password.length < 8) { toast("Temporary password must be at least 8 characters", "err"); return; }
+    const pe = passwordPolicyError(password); if (pe) { toast(pe, "err"); return; }
     setBusy(true);
     try {
       await api.post(`/users/${employee.id}/reset-password`, { password });
