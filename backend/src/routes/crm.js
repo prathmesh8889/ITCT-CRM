@@ -918,8 +918,8 @@ router.patch("/tasks/:id", requirePerm("tasks", "edit"), async (req, res, next) 
     const allowed = ["title", "description", "status", "priority", "due_date", "assigned_to_id"];
     const patch = Object.entries(req.body || {}).filter(([k, v]) => allowed.includes(k) && v !== undefined);
     if (patch.length) {
-      const sets = patch.map(([k], i) => `${k} = ${i + 1}`).join(", ");
-      await db.query(`UPDATE tasks SET ${sets} WHERE id = ${patch.length + 1}`, [...patch.map(([, v]) => v), Number(req.params.id)]);
+      const sets = patch.map(([k], i) => k + " = $" + (i + 1)).join(", ");
+      await db.query("UPDATE tasks SET " + sets + " WHERE id = $" + (patch.length + 1), [...patch.map(([, v]) => v), Number(req.params.id)]);
     }
     res.json({ ok: true });
   } catch (e) { next(e); }
@@ -968,8 +968,8 @@ router.patch("/meetings/:id", requirePerm("meetings", "edit"), async (req, res, 
     const patch = Object.entries(req.body || {}).filter(([k, v]) => allowed.includes(k) && v !== undefined);
     if (patch.length) {
       const values = patch.map(([k, v]) => k === "participants" ? JSON.stringify(v || []) : v);
-      const sets = patch.map(([k], i) => `${k} = ${i + 1}`).join(", ");
-      await db.query(`UPDATE meetings SET ${sets} WHERE id = ${patch.length + 1}`, [...values, id]);
+      const sets = patch.map(([k], i) => k + " = $" + (i + 1)).join(", ");
+      await db.query("UPDATE meetings SET " + sets + " WHERE id = $" + (patch.length + 1), [...values, id]);
     }
     await activity(req.user.id, "Meeting Edited", "meetings", id);
     const row = await db.one("SELECT * FROM meetings WHERE id = $1", [id]);
