@@ -548,10 +548,26 @@ router.patch("/companies/:id", requirePerm("companies", "edit"), async (req, res
                      "employee_count", "annual_revenue", "account_manager_id", "notes"];
     const patch = Object.entries(req.body || {}).filter(([k, v]) => allowed.includes(k) && v !== undefined);
     if (patch.length) {
-      const sets = patch.map(([k], i) => `${k} = $${i + 1}`).join(", ");
-      await db.query(`UPDATE companies SET ${sets} WHERE id = $${patch.length + 1}`, [...patch.map(([, v]) => v), id]);
+      const sets = patch.map(([k], i) => `${k} = ${i + 1}`).join(", ");
+      await db.query(`UPDATE companies SET ${sets} WHERE id = ${patch.length + 1}`, [...patch.map(([, v]) => v), id]);
     }
     res.json(await db.one("SELECT * FROM companies WHERE id = $1", [id]));
+  } catch (e) { next(e); }
+});
+
+router.delete("/companies/:id", requirePerm("companies", "delete"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const row = await db.one("SELECT * FROM companies WHERE id = $1", [id]);
+    if (!row) throw new HttpError(404, "Company not found");
+    await db.tx(async (c) => {
+      await c.query("UPDATE contacts SET company_id = NULL WHERE company_id = $1", [id]);
+      await c.query("UPDATE deals SET company_id = NULL WHERE company_id = $1", [id]);
+      await c.query("UPDATE quotations SET company_id = NULL WHERE company_id = $1", [id]);
+      await c.query("DELETE FROM companies WHERE id = $1", [id]);
+    });
+    await activity(req.user.id, "Company Deleted", "companies", id, { name: row.name });
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
@@ -589,10 +605,21 @@ router.patch("/contacts/:id", requirePerm("contacts", "edit"), async (req, res, 
     const allowed = ["first_name", "last_name", "company_id", "designation", "email", "phone", "whatsapp", "address", "city", "notes"];
     const patch = Object.entries(req.body || {}).filter(([k, v]) => allowed.includes(k) && v !== undefined);
     if (patch.length) {
-      const sets = patch.map(([k], i) => `${k} = $${i + 1}`).join(", ");
-      await db.query(`UPDATE contacts SET ${sets} WHERE id = $${patch.length + 1}`, [...patch.map(([, v]) => v), id]);
+      const sets = patch.map(([k], i) => `${k} = ${i + 1}`).join(", ");
+      await db.query(`UPDATE contacts SET ${sets} WHERE id = ${patch.length + 1}`, [...patch.map(([, v]) => v), id]);
     }
     res.json(await db.one("SELECT * FROM contacts WHERE id = $1", [id]));
+  } catch (e) { next(e); }
+});
+
+router.delete("/contacts/:id", requirePerm("contacts", "delete"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const row = await db.one("SELECT * FROM contacts WHERE id = $1", [id]);
+    if (!row) throw new HttpError(404, "Contact not found");
+    await db.query("DELETE FROM contacts WHERE id = $1", [id]);
+    await activity(req.user.id, "Contact Deleted", "contacts", id, { name: `${row.first_name} ${row.last_name || ""}`.trim() });
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
@@ -816,6 +843,19 @@ router.patch("/followups/:id", requirePerm("followups", "edit"), async (req, res
         [fu.lead_id, fu.employee_id, fu.type, when, fu.time, `Chained from follow-up #${fu.id}`]);
       await db.query("UPDATE leads SET next_followup_at = $1 WHERE id = $2", [when, fu.lead_id]);
     }
+    res.json({ ...(await db.one("SELECT * FROM followups WHERE id = $1", [fu.id])), date: String((await db.one("SELECT date FROM followups WHERE id = $1", [fu.id])).date).slice(0, 10) });
+  } catch (e) { next(e); }
+});
+
+router.delete("/followups/:id", requirePerm("followups", "delete"), async (req, res, next) => {
+  try {
+    const fu = await ensureFollowup(req, Number(req.params.id));
+    await db.query("DELETE FROM followups WHERE id = $1", [fu.id]);
+    if (fu.lead_id) {
+      const next = await db.one("SELECT date FROM followups WHERE lead_id=$1 AND status NOT IN ('Completed','Cancelled') ORDER BY date,time LIMIT 1", [fu.lead_id]);
+      await db.query("UPDATE leads SET next_followup_at=$1 WHERE id=$2", [next?.date || null, fu.lead_id]);
+    }
+    await activity(req.user.id, "Follow-up Deleted", "followups", fu.id, { type: fu.type, date: fu.date });
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
