@@ -14,6 +14,7 @@ import Dashboard from "./pages/Dashboard";
 import SalesTargets from "./pages/SalesTargets";
 import DepartmentWorkspace from "./pages/DepartmentWorkspace";
 import Leads from "./pages/Leads";
+import AdsLeads from "./pages/AdsLeads";
 import Discovery from "./pages/Discovery";
 import Pipeline from "./pages/Pipeline";
 import Relations from "./pages/Relations";
@@ -71,6 +72,7 @@ function Root() {
       <Route path="/targets" element={<Guard mod="targets"><SalesTargets/></Guard>}/>
       <Route path="/department-workspace" element={<><DepartmentTeamWorkPanel/><DepartmentWorkspace/></>}/>
       <Route path="/leads" element={<Guard mod="leads"><Leads/></Guard>}/>
+      <Route path="/ads-leads" element={<Guard mod="ads"><AdsLeads/></Guard>}/>
       <Route path="/discovery" element={<Guard mod="discovery"><Discovery/></Guard>}/>
       <Route path="/pipeline" element={<Guard mod="deals"><Pipeline/></Guard>}/>
       <Route path="/customers" element={<Guard mod="customers"><Relations/></Guard>}/>
