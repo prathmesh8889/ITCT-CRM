@@ -206,22 +206,75 @@ export function Reveal({ children, delay = 0, className = "" }: { children: Reac
 // ---------- dropdown ----------
 export function Menu({ trigger, children, align = "right" }: { trigger: ReactNode; children: ReactNode; align?: "left" | "right" }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 190, maxHeight: 360 });
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const place = () => {
+    const anchor = triggerRef.current;
+    const menu = menuRef.current;
+    if (!anchor || !menu) return;
+
+    const a = anchor.getBoundingClientRect();
+    const m = menu.getBoundingClientRect();
+    const gap = 6;
+    const edge = 8;
+    const width = Math.max(190, Math.min(m.width || 190, window.innerWidth - edge * 2));
+    let left = align === "right" ? a.right - width : a.left;
+    left = Math.max(edge, Math.min(left, window.innerWidth - width - edge));
+
+    const below = window.innerHeight - a.bottom - gap - edge;
+    const above = a.top - gap - edge;
+    const openUp = below < Math.min(220, m.height) && above > below;
+    const maxHeight = Math.max(120, Math.min(360, openUp ? above : below));
+    const top = openUp
+      ? Math.max(edge, a.top - Math.min(m.height, maxHeight) - gap)
+      : Math.min(window.innerHeight - edge, a.bottom + gap);
+
+    setPos({ top, left, width, maxHeight });
+  };
+
   useEffect(() => {
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    if (!open) return;
+    const raf = window.requestAnimationFrame(place);
+    const onViewport = () => place();
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("resize", onViewport);
+    window.addEventListener("scroll", onViewport, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.removeEventListener("resize", onViewport);
+      window.removeEventListener("scroll", onViewport, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, align]);
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      const n = e.target as Node;
+      if (!triggerRef.current?.contains(n) && !menuRef.current?.contains(n)) setOpen(false);
+    };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, []);
+
   return (
-    <div className="relative" ref={ref}>
-      <div onClick={() => setOpen((o) => !o)}>{trigger}</div>
-      {open && (
-        <div onClick={() => setOpen(false)}
-          className={`a-scale-in absolute z-40 mt-1.5 min-w-[190px] overflow-hidden rounded-lg border border-ink-200 bg-surface py-1 shadow-xl dark:border-ink-700 dark:bg-ink-900 ${align === "right" ? "right-0" : "left-0"}`}>
+    <>
+      <div className="relative inline-flex" ref={triggerRef} onClick={() => setOpen((o) => !o)}>{trigger}</div>
+      {open && typeof document !== "undefined" && createPortal(
+        <div
+          ref={menuRef}
+          role="menu"
+          onClick={() => setOpen(false)}
+          className="a-scale-in fixed z-[100] overflow-y-auto rounded-lg border border-ink-200 bg-surface py-1 shadow-2xl dark:border-ink-700 dark:bg-ink-900"
+          style={{ top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxHeight }}
+        >
           {children}
-        </div>
+        </div>,
+        document.body,
       )}
-    </div>
+    </>
   );
 }
 export function MenuItem({ onClick, children, danger }: { onClick?: () => void; children: ReactNode; danger?: boolean }) {
