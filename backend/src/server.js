@@ -13,6 +13,7 @@ const { ensureWorkforceRoleSchema } = require("./workforce-role-schema");
 const { ensureWorkforceDomainSchema } = require("./workforce-domain-schema");
 const { ensureTeamSchema } = require("./team-schema");
 const { internSanitizer } = require("./intern-sanitizer");
+const { workforceIntegritySummary } = require("./workforce-integrity");
 const { router: crmRoutes, startDiscoveryWorker } = require("./routes/crm");
 
 const app = express();
@@ -113,6 +114,14 @@ async function main() {
     await ensureWorkforceDomainSchema();
     await ensureTeamSchema();
   }
+  try {
+    const integrity = await workforceIntegritySummary();
+    const level = integrity.healthy ? "log" : "warn";
+    console[level](`[boot] workforce integrity: ${JSON.stringify(integrity)}`);
+  } catch (e) {
+    console.warn("[boot] workforce integrity check failed (continuing):", e.message);
+  }
+
   try {
     const legacy = await cleanupDemoData();
     const workforce = await cleanupWorkforceDemoData();

@@ -377,3 +377,74 @@ test("ads lead page and backend routes are mounted in production navigation", ()
   assert.match(layout, /to: "\/ads-leads", label: "Ads Leads"/);
   assert.match(server, /routes\/ads-leads/);
 });
+
+
+test("Workforce OS source catalog has 14 departments and 56 unique canonical roles", () => {
+  const { DEPARTMENT_CATALOG } = require("../src/departments-catalog");
+  const { WORKFORCE_ROLES } = require("../src/workforce-roles");
+  assert.strictEqual(DEPARTMENT_CATALOG.length, 14);
+  assert.strictEqual(WORKFORCE_ROLES.length, 56);
+  assert.strictEqual(new Set(DEPARTMENT_CATALOG.map((d) => d.key)).size, 14);
+  assert.strictEqual(new Set(WORKFORCE_ROLES.map((r) => r.title.toLowerCase())).size, 56);
+});
+
+test("every canonical workforce role maps to one valid department and L3-L6 level", () => {
+  const { DEPARTMENT_CATALOG } = require("../src/departments-catalog");
+  const { WORKFORCE_ROLES } = require("../src/workforce-roles");
+  const keys = new Map(DEPARTMENT_CATALOG.map((d) => [d.key, d.name]));
+  const grouped = new Map();
+  for (const role of WORKFORCE_ROLES) {
+    assert.ok(keys.has(role.department_key), `unknown department key for ${role.title}`);
+    assert.strictEqual(role.department, keys.get(role.department_key), `department name mismatch for ${role.title}`);
+    assert.ok(Number.isInteger(role.level) && role.level >= 3 && role.level <= 6, `invalid access level for ${role.title}`);
+    const list = grouped.get(role.department_key) || [];
+    list.push(role.level);
+    grouped.set(role.department_key, list);
+  }
+  for (const dept of DEPARTMENT_CATALOG) {
+    assert.deepStrictEqual(
+      (grouped.get(dept.key) || []).sort((a,b) => a-b),
+      [3,4,5,6],
+      `${dept.name} must have exactly L3, L4, L5 and L6 canonical roles`,
+    );
+  }
+});
+
+test("every canonical role produces a valid permission matrix", () => {
+  const { MODULES, PERMS } = require("../src/security");
+  const { WORKFORCE_ROLES } = require("../src/workforce-roles");
+  const { workforcePermissions } = require("../src/workforce-permissions");
+  for (const role of WORKFORCE_ROLES) {
+    const matrix = workforcePermissions(role);
+    assert.ok(matrix && typeof matrix === "object", `missing permissions for ${role.title}`);
+    for (const [module, perms] of Object.entries(matrix)) {
+      assert.ok(MODULES.includes(module), `unknown module ${module} on ${role.title}`);
+      assert.ok(Array.isArray(perms), `permissions must be array for ${role.title} / ${module}`);
+      for (const perm of perms) assert.ok(PERMS.includes(perm), `unknown permission ${perm} on ${role.title}`);
+    }
+  }
+});
+
+test("scoped contacts use PostgreSQL array placeholders for non-admin employees", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const src = fs.readFileSync(path.join(__dirname, "../src/routes/scoped-crm.js"), "utf8");
+  assert.ok(src.includes('c.account_manager_id = ANY($" + params.length + "::int[])'));
+  assert.ok(src.includes('ct.created_by = ANY($" + params.length + "::int[])'));
+  assert.doesNotMatch(src, /ANY\(\$\{params\.length\}::int\[\]\)/);
+});
+
+test("successful authentication is not reported as failed when initial CRM hydration has an unrelated module error", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const src = fs.readFileSync(path.join(__dirname, "../../src/store.tsx"), "utf8");
+  assert.match(src, /Authentication succeeded\. A temporary failure while loading one CRM/);
+  assert.match(src, /initial data sync failed after successful login/);
+  assert.match(src, /return \{ ok: true \};/);
+});
+
+test("employee creation and auth modules load together with workforce integrity audit", () => {
+  assert.doesNotThrow(() => require("../src/routes/user-create"));
+  assert.doesNotThrow(() => require("../src/routes/auth"));
+  assert.doesNotThrow(() => require("../src/workforce-integrity"));
+});

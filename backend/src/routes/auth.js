@@ -55,6 +55,10 @@ router.post("/login", async (req, res, next) => {
     }
 
     const role = await db.one("SELECT * FROM roles WHERE id = $1", [user.role_id]);
+    if (!role) {
+      await audit(user.id, user.name, "Failed Login", "auth", "Account role missing");
+      throw new HttpError(403, "Your account role is not configured. Contact Super Admin.");
+    }
     const refresh = signRefresh(user);
     await db.query("INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1,$2,$3)",
       [user.id, sha256(refresh), new Date(Date.now() + config.refreshDays * 86400_000)]);
