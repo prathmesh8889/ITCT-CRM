@@ -193,20 +193,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, pw: string) => {
     if (!DEMO_MODE) {
+      let me: MeResponse;
+      let mapped: User;
       try {
         const r = await authApi.login(email.trim(), pw);
         setTokens(r.data.access_token, r.data.refresh_token);
-        const me = (await authApi.me()).data as MeResponse;
-        const mapped = mapMeUser(me);
-        if (!mapped.mustChangePassword) await hydrateFromBackend(me.perms || {}, me.is_super);
-        setUser(mapped);
-        setPerms(me.perms || {});
-        setIsSuper(me.is_super);
-        setRoleName(me.role || "");
-        return { ok: true };
+        me = (await authApi.me()).data as MeResponse;
+        mapped = mapMeUser(me);
       } catch (e) {
+        clearTokens();
         return { ok: false, error: e instanceof Error ? e.message : "Login failed." };
       }
+
+      // Authentication succeeded. A temporary failure while loading one CRM
+      // module must not be reported to the employee as a bad login.
+      setUser(mapped);
+      setPerms(me.perms || {});
+      setIsSuper(me.is_super);
+      setRoleName(me.role || "");
+      setServerDown(false);
+      if (!mapped.mustChangePassword) {
+        try {
+          await hydrateFromBackend(me.perms || {}, me.is_super);
+        } catch (e) {
+          console.error("[crm] initial data sync failed after successful login", e);
+        }
+      }
+      return { ok: true };
     }
 
     const d = getDB();
