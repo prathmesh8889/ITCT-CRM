@@ -194,7 +194,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, pw: string) => {
     if (!DEMO_MODE) {
       let me: MeResponse;
-      let mapped: User;
+      let mapped: ReturnType<typeof mapMeUser>;
       try {
         const r = await authApi.login(email.trim(), pw);
         setTokens(r.data.access_token, r.data.refresh_token);
